@@ -3,7 +3,9 @@
 <package format="3">
   <name>local_controller</name>
   <version>0.0.0</version>
-  <description>Standalone ROS 2 local controller for following a global path.</description>
+  <description>
+    ROS 2 local controller with Pure Pursuit path tracking, DWA-like obstacle avoidance, local costmap generation, and safety state management.
+  </description>
   <maintainer email="user@example.com">USER</maintainer>
   <license>Apache-2.0</license>
 
