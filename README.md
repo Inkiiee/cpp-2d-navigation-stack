@@ -51,7 +51,7 @@ ros2 launch local_controller navigation.launch.py \
 ## 저장소 구조
 
 ```text
-cpp-2d-slam/
+cpp-2d-navigation-stack/
 ├── cpp_2d_slam/
 ├── global_planner/
 └── local_controller/
