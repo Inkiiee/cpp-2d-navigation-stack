@@ -18,6 +18,7 @@ namespace rcl_slam{
         if(ros_pub_) backend->setRosPublisher(ros_pub_);
         loop_detecter = new LoopDetecter(backend->getPoseGraph(), backend->getSubMaps(), backend->getSharedDataMutex(), this);
         painter = new Painter(backend->getPoseGraph(), backend->getWorldMap(), backend->getLocalMap(), pos_r, backend->getSharedDataMutex());
+        painter->setRosPublisher(ros_pub_);
 
         QObject::connect(
             loop_detecter, 
@@ -45,6 +46,13 @@ namespace rcl_slam{
             &ScanMatchBackend::scanUpdated,
             painter,
             &Painter::scanUpdate,
+            Qt::ConnectionType::QueuedConnection
+        );
+        QObject::connect(
+            bridge,
+            &Bridge::planDataReceived,
+            painter,
+            &Painter::globalPlanUpdate,
             Qt::ConnectionType::QueuedConnection
         );
         QObject::connect(

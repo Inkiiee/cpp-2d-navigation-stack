@@ -84,6 +84,7 @@ graph LR
     end
 
     LS -- /scan --> B
+    LS -- /scan_deskewed PointCloud2 --> LC[Local Controller]
     OL -- /odom --> B
     IL -- /imu --> B
 

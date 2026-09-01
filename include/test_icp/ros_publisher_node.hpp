@@ -3,12 +3,14 @@
 
 #include "rclcpp/rclcpp.hpp"
 #include "nav_msgs/msg/occupancy_grid.hpp"
+#include "geometry_msgs/msg/pose_stamped.hpp"
 #include "geometry_msgs/msg/pose_with_covariance_stamped.hpp"
 #include "geometry_msgs/msg/transform_stamped.hpp"
 #include <tf2_ros/transform_broadcaster.h>
 
 #include <cmath>
 #include <chrono>
+#include <memory>
 #include <vector>
 #include <atomic>
 
@@ -21,6 +23,10 @@ public:
             "/map", rclcpp::QoS(1).transient_local().reliable());
         pose_pub_ = this->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>(
             "/slam_pose", 10);
+        goal_pub_ = this->create_publisher<geometry_msgs::msg::PoseStamped>(
+            "/goal", 10);
+        goal_pose_pub_ = this->create_publisher<geometry_msgs::msg::PoseStamped>(
+            "/goal_pose", 10);
         tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
     }
 
@@ -59,6 +65,20 @@ public:
         pose_pub_->publish(pose_msg);
     }
 
+    void publishGoal(double map_x, double map_y, double map_theta = 0.0)
+    {
+        geometry_msgs::msg::PoseStamped goal_msg;
+        goal_msg.header.stamp = this->now();
+        goal_msg.header.frame_id = "map";
+        goal_msg.pose.position.x = map_x;
+        goal_msg.pose.position.y = map_y;
+        goal_msg.pose.position.z = 0.0;
+        goal_msg.pose.orientation.z = std::sin(map_theta / 2.0);
+        goal_msg.pose.orientation.w = std::cos(map_theta / 2.0);
+        goal_pub_->publish(goal_msg);
+        goal_pose_pub_->publish(goal_msg);
+    }
+
     // OccupancyGrid 맵 퍼블리시 (최소 2초 간격으로 throttle)
     void publishMap(const std::vector<int8_t>& data, int width, int height,
                     double origin_x, double origin_y, double resolution)
@@ -89,6 +109,8 @@ public:
 private:
     rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr map_pub_;
     rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr pose_pub_;
+    rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr goal_pub_;
+    rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr goal_pose_pub_;
     std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
 
     std::chrono::steady_clock::time_point last_map_time_;

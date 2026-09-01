@@ -61,6 +61,7 @@ set(CPP_SOURCES
   src/${PROJECT_NAME}/imu_receive_node.cpp
   src/${PROJECT_NAME}/sensor_receive_node.cpp
   src/${PROJECT_NAME}/odom_receive_node.cpp
+  src/${PROJECT_NAME}/plan_receive_node.cpp
   src/${PROJECT_NAME}/teleopt.cpp
   src/slam/base/scan_match.cpp
   src/slam/base/slam_basic.cpp
