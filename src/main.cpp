@@ -9,7 +9,9 @@
 #include "rclcpp/rclcpp.hpp"
 #include "sensor_receive_node.hpp"
 #include "odom_receive_node.hpp"
+#include "plan_receive_node.hpp"
 #include "teleopt.hpp"
+#include "ros_publisher_node.hpp"
 
 bool is_end = false;
 
@@ -36,35 +38,39 @@ int main(int argc, char *argv[])
     std::signal(SIGINT, signal_handler);
 
     Bridge bridge;
-    auto slam_system = std::make_unique<rcl_slam::SlamSystem>(&bridge);
+    auto ros_pub = std::make_shared<RosPublisherNode>();
+    auto slam_system = std::make_unique<rcl_slam::SlamSystem>(&bridge, ros_pub);
 
     //rcl 루프 실행 및 브리지 등록
     auto receiver = std::make_shared<LaserScan>(&bridge, "my_laser_scan_node");
     auto odomLoader = std::make_shared<OdomLoader>(&bridge);
     auto imuLoader = std::make_shared<ImuLoader>(&bridge);
+    auto planReceiver = std::make_shared<PlanPathSubscriber>(&bridge);
 
     auto sharedMemPtr = std::make_shared<SharedMem>();
-    auto keyInputMon = std::make_shared<KeyInputMon>(sharedMemPtr);
-    auto myTelNode = std::make_shared<MyTelNode>(sharedMemPtr);
+    // auto keyInputMon = std::make_shared<KeyInputMon>(sharedMemPtr);
+    // auto myTelNode = std::make_shared<MyTelNode>(sharedMemPtr);
 
-    std::thread t1([odomLoader, receiver, imuLoader](){
+    std::thread t1([odomLoader, receiver, imuLoader, planReceiver, ros_pub](){
         while(!is_end){
             rclcpp::spin_some(imuLoader);
             rclcpp::spin_some(odomLoader);
             rclcpp::spin_some(receiver);
+            rclcpp::spin_some(planReceiver);
+            rclcpp::spin_some(ros_pub);
         }
     });
 
-    std::thread t2([keyInputMon](){
-        keyInputMon->process();
-    });
+    // std::thread t2([keyInputMon](){
+    //     keyInputMon->process();
+    // });
 
-    std::thread t3([myTelNode](){
-        while(!is_end){
-            rclcpp::spin_some(myTelNode);
-        }
-    });
-    slam_system->setSharedMem(sharedMemPtr.get());
+    // std::thread t3([myTelNode](){
+    //     while(!is_end){
+    //         rclcpp::spin_some(myTelNode);
+    //     }
+    // });
+    // slam_system->setSharedMem(sharedMemPtr.get());
 
     int ret = app.exec();
 
@@ -73,13 +79,13 @@ int main(int argc, char *argv[])
     if(t1.joinable()){
         t1.join();
     }
-    if(t2.joinable()){
-        t2.join();
-    }
-    if(t3.joinable()){
-        t3.join();
-    }
+    // if(t2.joinable()){
+    //     t2.join();
+    // }
+    // if(t3.joinable()){
+    //     t3.join();
+    // }
     rclcpp::shutdown();
-    keyInputMon->end();
+    // keyInputMon->end();
     return ret;
 }

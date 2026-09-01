@@ -27,6 +27,7 @@ public:
     virtual ~Bridge() = default;
 
     void emitScanDataReceived(const ScanAxis& xs, const ScanAxis& ys);
+    void emitPlanDataReceived(const ScanAxis& xs, const ScanAxis& ys);
     void emitOdomDataReceived(double stamp, double x, double y, double z, double rx, double ry, double rz, double rw);
     void emitImuHeadingReceived(double stamp, double rx, double ry, double rz, double rw);
     bool deskewScan(const sensor_msgs::msg::LaserScan& scan, ScanAxis& xs, ScanAxis& ys);
@@ -45,6 +46,8 @@ private:
 
 Q_SIGNALS:
     void scanDataReceived(const ScanAxis& xs, const ScanAxis& ys);
+Q_SIGNALS:
+    void planDataReceived(const ScanAxis& xs, const ScanAxis& ys);
 Q_SIGNALS:
     void odomDataReceived(double x, double y, double z, double rx, double ry, double rz);
 Q_SIGNALS:

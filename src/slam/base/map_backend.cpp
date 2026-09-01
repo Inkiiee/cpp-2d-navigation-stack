@@ -33,8 +33,8 @@ namespace rcl_map_backend{
             if(w.hit_count == 0 && w.miss_count == 0){
                 w.x = index.first * pos_r;
                 w.y = index.second * pos_r;
+                w.hit_count += 1;
             }
-            w.hit_count += 1;
             w.last_seen_frame = frame_index;
         }
     }
@@ -46,7 +46,7 @@ namespace rcl_map_backend{
         int y1 = target.second;
 
         constexpr int kMaxMiss = 20;
-        constexpr int kOccupiedThreshold = 3; // hit이 이 이상이면 이미 장애물 → miss 안 찍음
+        constexpr int kOccupiedThreshold = 5; // hit이 이 이상이면 이미 장애물 → miss 안 찍음
 
         int dx = std::abs(x1 - x0);
         int dy = std::abs(y1 - y0);
@@ -103,10 +103,10 @@ namespace rcl_map_backend{
 
     bool MapBackend::isStaticCell(const Weight& weight) const{
         int total = weight.hit_count + weight.miss_count;
-        if(total == 0) return false;
+        if(total < 3) return false;  // 최소 3회 이상 관측된 셀만
 
         double occupied_ratio = static_cast<double>(weight.hit_count) / total;
-        return occupied_ratio >= 0.55;
+        return occupied_ratio >= 0.7;
     }
 
     void MapBackend::getPos(std::vector<double>& x, std::vector<double>& y, bool static_only){
@@ -299,5 +299,51 @@ namespace rcl_map_backend{
 
     void MapBackend::incrementFrameIndex(){
         frame_index++;
+    }
+
+    void MapBackend::getOccupancyGridData(std::vector<int8_t>& data, int& width, int& height,
+                                          double& origin_x, double& origin_y) const
+    {
+        if(wm.empty()){
+            data.clear();
+            width = height = 0;
+            origin_x = origin_y = 0;
+            return;
+        }
+
+        // 셀 인덱스 범위 계산
+        auto it = wm.begin();
+        int min_gx = it->first.first, max_gx = min_gx;
+        int min_gy = it->first.second, max_gy = min_gy;
+        for(; it != wm.end(); ++it){
+            min_gx = std::min(min_gx, it->first.first);
+            max_gx = std::max(max_gx, it->first.first);
+            min_gy = std::min(min_gy, it->first.second);
+            max_gy = std::max(max_gy, it->first.second);
+        }
+
+        width = max_gx - min_gx + 1;
+        height = max_gy - min_gy + 1;
+        origin_x = min_gx * pos_r;
+        origin_y = min_gy * pos_r;
+
+        data.assign(static_cast<size_t>(width) * height, -1);
+
+        for(const auto& entry : wm){
+            int lx = entry.first.first - min_gx;
+            int ly = entry.first.second - min_gy;
+            size_t idx = static_cast<size_t>(ly) * width + lx;
+
+            const Weight& w = entry.second;
+            int total = w.hit_count + w.miss_count;
+            if(total == 0) continue;
+
+            double occ_ratio = static_cast<double>(w.hit_count) / total;
+            if(occ_ratio >= 0.80 && total >= 5){
+                data[idx] = 100;  // occupied
+            } else {
+                data[idx] = 0;    // free
+            }
+        }
     }
 }

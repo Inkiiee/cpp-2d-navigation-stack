@@ -154,6 +154,10 @@ void Bridge::emitScanDataReceived(const ScanAxis& xs, const ScanAxis& ys){
     emit scanDataReceived(xs, ys);
 }
 
+void Bridge::emitPlanDataReceived(const ScanAxis& xs, const ScanAxis& ys){
+    emit planDataReceived(xs, ys);
+}
+
 void Bridge::emitOdomDataReceived(double stamp, double x, double y, double z, double rx, double ry, double rz, double rw){
     // Standard ROS quaternion-to-euler
     double rad_rz = quaternionToYaw(rx, ry, rz, rw);

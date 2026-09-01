@@ -1,5 +1,6 @@
 #include "slam.h"
 #include "slam_basic.h"
+#include "ros_publisher_node.hpp"
 
 #include <chrono>
 #include <QThread>
@@ -12,10 +13,12 @@ namespace rcl_slam{
     using namespace rcl_slam_basic_transform;
     using rcl_pose_graph_type::Node;
 
-    SlamSystem::SlamSystem(Bridge* b, double r, QObject* parent): QObject(parent), pos_r{r}, bridge{b} {
+    SlamSystem::SlamSystem(Bridge* b, std::shared_ptr<RosPublisherNode> ros_pub, double r, QObject* parent): QObject(parent), pos_r{r}, bridge{b}, ros_pub_{ros_pub} {
         backend = new ScanMatchBackend(bridge, pos_r, this);
+        if(ros_pub_) backend->setRosPublisher(ros_pub_);
         loop_detecter = new LoopDetecter(backend->getPoseGraph(), backend->getSubMaps(), backend->getSharedDataMutex(), this);
         painter = new Painter(backend->getPoseGraph(), backend->getWorldMap(), backend->getLocalMap(), pos_r, backend->getSharedDataMutex());
+        painter->setRosPublisher(ros_pub_);
 
         QObject::connect(
             loop_detecter, 
@@ -43,6 +46,13 @@ namespace rcl_slam{
             &ScanMatchBackend::scanUpdated,
             painter,
             &Painter::scanUpdate,
+            Qt::ConnectionType::QueuedConnection
+        );
+        QObject::connect(
+            bridge,
+            &Bridge::planDataReceived,
+            painter,
+            &Painter::globalPlanUpdate,
             Qt::ConnectionType::QueuedConnection
         );
         QObject::connect(
@@ -138,6 +148,20 @@ namespace rcl_slam{
         qDebug() << "[TIMING rebuildMap] submaps=" << count
                  << " snapshot=" << us_snap << "us transform=" << us_xform
                  << "us mapUpdate=" << us_map << "us total=" << us_total << "us (" << us_total / 1000 << "ms)";
+
+        // ROS2 맵 퍼블리시 (throttle은 내부에서 처리)
+        if(ros_pub_){
+            std::vector<int8_t> grid_data;
+            int gw = 0, gh = 0;
+            double ox = 0, oy = 0;
+            {
+                std::lock_guard<std::mutex> lock(*data_mutex);
+                world_map->getOccupancyGridData(grid_data, gw, gh, ox, oy);
+            }
+            if(gw > 0 && gh > 0){
+                ros_pub_->publishMap(grid_data, gw, gh, ox, oy, world_map->getResolution());
+            }
+        }
     }
 
     void SlamSystem::setSharedMem(SharedMem* sm){

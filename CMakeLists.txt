@@ -26,6 +26,8 @@ find_package(Eigen3 REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
+find_package(tf2_ros REQUIRED)
+find_package(tf2_geometry_msgs REQUIRED)
 
 # find Qt dependencies
 find_package(Qt6 REQUIRED COMPONENTS Gui Core Widgets)
@@ -41,6 +43,8 @@ set(ROS_DEPEND
   sensor_msgs
   nav_msgs
   geometry_msgs
+  tf2_ros
+  tf2_geometry_msgs
 )
 
 set(QtLib
@@ -57,6 +61,7 @@ set(CPP_SOURCES
   src/${PROJECT_NAME}/imu_receive_node.cpp
   src/${PROJECT_NAME}/sensor_receive_node.cpp
   src/${PROJECT_NAME}/odom_receive_node.cpp
+  src/${PROJECT_NAME}/plan_receive_node.cpp
   src/${PROJECT_NAME}/teleopt.cpp
   src/slam/base/scan_match.cpp
   src/slam/base/slam_basic.cpp

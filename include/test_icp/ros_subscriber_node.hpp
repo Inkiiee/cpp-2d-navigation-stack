@@ -16,7 +16,8 @@ protected:
     rclcpp::CallbackGroup::SharedPtr sub_cb_group_;
     Bridge* bridge_;
 
-    RosSubscriberNode(Bridge* b, const std::string& node_name, const std::string& topic)
+    RosSubscriberNode(Bridge* b, const std::string& node_name, const std::string& topic,
+                      const rclcpp::QoS& qos = rclcpp::SensorDataQoS())
         : Node(node_name.c_str()), bridge_{b}
     {
         node_ = std::shared_ptr<rclcpp::Node>(this, [](rclcpp::Node*){});
@@ -25,7 +26,7 @@ protected:
         sub_options.callback_group = sub_cb_group_;
         sub_ = node_->template create_subscription<MsgType>(
             topic,
-            rclcpp::SensorDataQoS(),
+            qos,
             std::bind(&Derived::received, static_cast<Derived*>(this), std::placeholders::_1),
             sub_options
         );

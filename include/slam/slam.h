@@ -7,6 +7,9 @@
 #include "painter.h"
 
 #include <QObject>
+#include <memory>
+
+class RosPublisherNode;
 
 class SharedMem;
 
@@ -20,8 +23,9 @@ namespace rcl_slam{
         rcl_loop_detecter::LoopDetecter* loop_detecter;
         rcl_painter::Painter* painter;
         Bridge* bridge = nullptr;
+        std::shared_ptr<RosPublisherNode> ros_pub_;
     public:
-        SlamSystem(Bridge* b, double r=0.05,QObject* parent=nullptr);
+        SlamSystem(Bridge* b, std::shared_ptr<RosPublisherNode> ros_pub = nullptr, double r=0.05, QObject* parent=nullptr);
         ~SlamSystem();
 
         void setSharedMem(SharedMem* sm);

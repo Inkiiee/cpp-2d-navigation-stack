@@ -57,6 +57,8 @@ namespace rcl_map_backend{
         void rebuildFromSubmaps(
             const std::vector<double>& sensor_xs, const std::vector<double>& sensor_ys,
             const std::vector<std::vector<double>>& point_xs, const std::vector<std::vector<double>>& point_ys);
+        void getOccupancyGridData(std::vector<int8_t>& data, int& width, int& height,
+                                  double& origin_x, double& origin_y) const;
         void incrementFrameIndex();
     };
 }

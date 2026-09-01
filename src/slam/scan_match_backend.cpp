@@ -1,6 +1,7 @@
 #include "scan_match_backend.h"
 #include "slam_basic.h"
 #include "my_pose_graph.h"
+#include "ros_publisher_node.hpp"
 
 #include <cmath>
 #include <chrono>
@@ -23,6 +24,10 @@ namespace rcl_scan_match_backend{
         // QObject::connect(bridge, &Bridge::imuHeadingReceived, this, &ScanMatchBackend::imuUpdate, Qt::ConnectionType::QueuedConnection);
     }
     ScanMatchBackend::~ScanMatchBackend(){}
+
+    void ScanMatchBackend::setRosPublisher(std::shared_ptr<RosPublisherNode> pub){
+        ros_pub_ = pub;
+    }
 
     std::vector<sub_map>* ScanMatchBackend::getSubMaps(){
         return &sub_maps;
@@ -136,16 +141,17 @@ namespace rcl_scan_match_backend{
         if(!moved_enough){
             std::vector<double> pixel_x(latest_xs.begin(), latest_xs.end()), pixel_y(latest_ys.begin(), latest_ys.end());
             rotationAndTranslation(map_x, map_y, map_theta, pixel_x, pixel_y);
-            local_map.addPos(pixel_x, pixel_y);
+            local_map.updateOccupancyMap(map_x, map_y, pixel_x, pixel_y);
             emit scanUpdated(pixel_x, pixel_y);
             emit predictedPose(map_x, map_y, map_theta);
+            if(ros_pub_) ros_pub_->publishPoseAndTF(map_x, map_y, map_theta, odom_x, odom_y, odom_theta);
             processing_busy_ = false;
             return;
         }
 
-        if(frame_index++ % 10 == 0){
+        if(frame_index++ % 5 == 0){
             rcl_map_backend_type::sub_map sm;
-            local_map.getPos(sm.x, sm.y);
+            local_map.getPos(sm.x, sm.y, true);  // static_only: hit 비율 높은 셀만
 
             RobotBasePose currentPose{map_x, map_y, map_theta};
             // 로컬 좌표계에서의 센서 원점 (로컬 기준이므로 0,0)
@@ -181,13 +187,27 @@ namespace rcl_scan_match_backend{
             qDebug()<<"Odom "<<preciouse(odom_x, 3)<<" "<<preciouse(odom_y, 3)<<" "<<preciouse(odom_theta, 3);
 
             emit subMapUpdated(current_index);
+
+            // 서브맵 생성 시 ROS2 맵 퍼블리시 (내부 throttle 적용)
+            if(ros_pub_){
+                std::vector<int8_t> grid_data;
+                int gw = 0, gh = 0;
+                double ox = 0, oy = 0;
+                {
+                    std::lock_guard<std::mutex> lock(shared_data_mutex_);
+                    world_map.getOccupancyGridData(grid_data, gw, gh, ox, oy);
+                }
+                if(gw > 0 && gh > 0){
+                    ros_pub_->publishMap(grid_data, gw, gh, ox, oy, world_map.getResolution());
+                }
+            }
         }
 
         // 매칭 대상: local_map + world_map에서 로봇 근처 다운샘플된 포인트
         auto t_submap = std::chrono::steady_clock::now();
         match_ref_map_.clearMap();
         std::vector<double> pixel_x, pixel_y, world_x, world_y;
-        local_map.getPos(world_x, world_y);
+        local_map.getPos(world_x, world_y, true);
         match_ref_map_.addPos(world_x, world_y);
 
         // world_map ref 캐시: 맵 변경 또는 0.5m 이상 이동 시에만 재계산
@@ -268,7 +288,7 @@ namespace rcl_scan_match_backend{
         pixel_y.assign(latest_ys.begin(), latest_ys.end());
         rotationAndTranslation(map_x, map_y, map_theta, pixel_x, pixel_y);
 
-        local_map.addPos(pixel_x, pixel_y);
+        local_map.updateOccupancyMap(map_x, map_y, pixel_x, pixel_y);
 
         last_match_x_ = map_x;
         last_match_y_ = map_y;
@@ -283,6 +303,7 @@ namespace rcl_scan_match_backend{
 
         emit scanUpdated(pixel_x, pixel_y);
         emit predictedPose(map_x, map_y, map_theta);
+        if(ros_pub_) ros_pub_->publishPoseAndTF(map_x, map_y, map_theta, odom_x, odom_y, odom_theta);
 
         processing_busy_ = false;
     }
