@@ -1,4 +1,4 @@
-# cpp-2d-slam
+# cpp-2d-navigation-stack
 
 ROS 2 기반의 2D SLAM 및 자율주행 스택입니다. ICP 기반 위치 추정, A* 전역 경로 계획, 로컬 경로 추종을 하나의 저장소에서 함께 관리합니다.
 
