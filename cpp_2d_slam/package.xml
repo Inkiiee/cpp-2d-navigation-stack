@@ -3,7 +3,9 @@
 <package format="3">
   <name>cpp_2d_slam</name>
   <version>0.0.0</version>
-  <description>TODO: Package description</description>
+  <description>
+    ROS 2 based 2D LiDAR SLAM package with ICP, NDT, CSM, loop closure, pose graph optimization, and occupancy grid mapping.
+  </description>
   <maintainer email="inki@todo.todo">inki</maintainer>
   <license>Apache-2.0</license>
 
