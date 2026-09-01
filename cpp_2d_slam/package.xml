@@ -6,7 +6,7 @@
   <description>
     ROS 2 based 2D LiDAR SLAM package with ICP, NDT, CSM, loop closure, pose graph optimization, and occupancy grid mapping.
   </description>
-  <maintainer email="inki@todo.todo">inki</maintainer>
+  <maintainer email="121854251+Inkiiee@users.noreply.github.com">Inkiiee</maintainer>
   <license>Apache-2.0</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
