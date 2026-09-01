@@ -6,7 +6,7 @@
   <description>
     ROS 2 local controller with Pure Pursuit path tracking, DWA-like obstacle avoidance, local costmap generation, and safety state management.
   </description>
-  <maintainer email="user@example.com">USER</maintainer>
+  <maintainer email="121854251+Inkiiee@users.noreply.github.com">Inkiiee</maintainer>
   <license>Apache-2.0</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
