@@ -18,7 +18,7 @@ public:
     double width, double height, double resolution,
     double robot_radius, double safety_margin, double obstacle_max_range);
 
-  // test_icp가 deskew한 최신 PointCloud2 한 장으로 코스트맵을 갱신한다.
+  // cpp_2d_slam이 deskew한 최신 PointCloud2 한 장으로 코스트맵을 갱신한다.
   // x/y 필드가 없으면 false를 반환한다.
   bool update(const sensor_msgs::msg::PointCloud2 & cloud);
 

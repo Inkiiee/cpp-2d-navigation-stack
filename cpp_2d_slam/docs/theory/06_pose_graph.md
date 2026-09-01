@@ -150,7 +150,7 @@ $$
 
 ## 최적화: g2o (Levenberg-Marquardt)
 
-`TEST_ICP_HAS_G2O` 매크로 정의 시 g2o 라이브러리를 사용한다.
+`CPP_2D_SLAM_HAS_G2O` 매크로 정의 시 g2o 라이브러리를 사용한다.
 
 ### 구조
 

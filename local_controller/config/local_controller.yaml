@@ -3,7 +3,7 @@ standalone_local_controller:
     plan_topic: /plan
     pose_topic: /slam_pose
     goal_topic: /goal_pose
-    # test_icp가 scan 종료 시점의 base_link 기준으로 deskew해 발행한다.
+    # cpp_2d_slam이 scan 종료 시점의 base_link 기준으로 deskew해 발행한다.
     scan_topic: /scan_deskewed
     cmd_vel_topic: /cmd_vel
     costmap_topic: /local_costmap
@@ -17,7 +17,7 @@ standalone_local_controller:
     goal_yaw_tolerance: 0.15
     # planner가 start/goal을 free cell로 snap해도 같은 goal의 plan으로 인정한다.
     plan_goal_match_tolerance: 0.75
-    # test_icp scan matching 시간이 순간적으로 길어져도 불필요하게 0 속도를
+    # cpp_2d_slam scan matching 시간이 순간적으로 길어져도 불필요하게 0 속도를
     # 반복 발행하지 않도록 pose timeout을 scan timeout보다 넉넉히 둔다.
     pose_timeout: 1.5
     scan_timeout: 0.5

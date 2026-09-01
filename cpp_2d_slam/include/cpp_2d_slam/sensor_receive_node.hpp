@@ -1,5 +1,5 @@
-#ifndef __TEST_ICP__SENSOR_RECEIVE_NODE_HPP__
-#define __TEST_ICP__SENSOR_RECEIVE_NODE_HPP__
+#ifndef __CPP_2D_SLAM__SENSOR_RECEIVE_NODE_HPP__
+#define __CPP_2D_SLAM__SENSOR_RECEIVE_NODE_HPP__
 
 #include <string>
 #include <vector>

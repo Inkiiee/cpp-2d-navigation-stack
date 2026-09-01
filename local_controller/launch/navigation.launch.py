@@ -1,4 +1,4 @@
-"""test_icp, global planner, local controller를 함께 실행하는 bringup launch."""
+"""cpp_2d_slam, global planner, local controller를 함께 실행하는 bringup launch."""
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
@@ -30,9 +30,9 @@ def generate_launch_description():
 
     # ICP SLAM:
     # /slam_pose, /map, map->odom TF, /scan_deskewed를 발행한다.
-    test_icp_node = Node(
-        package="test_icp",
-        executable="test_icp",
+    cpp_2d_slam_node = Node(
+        package="cpp_2d_slam",
+        executable="cpp_2d_slam",
         output="screen",
         parameters=[
             {
@@ -43,7 +43,7 @@ def generate_launch_description():
 
     # Global Planner:
     # /map + /slam_pose + /goal_pose를 받아 /plan을 발행한다.
-    # test_icp의 transient_local /map을 시작 순서와 관계없이 받도록 설정한다.
+    # cpp_2d_slam의 transient_local /map을 시작 순서와 관계없이 받도록 설정한다.
     global_planner_node = Node(
         package="global_planner",
         executable="standalone_global_planner",
@@ -135,7 +135,7 @@ def generate_launch_description():
                 default_value="4.0",
                 description="Robot-centered costmap height in meters",
             ),
-            test_icp_node,
+            cpp_2d_slam_node,
             global_planner_node,
             local_controller_node,
         ]

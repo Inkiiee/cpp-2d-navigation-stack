@@ -124,7 +124,7 @@ StandaloneLocalController::StandaloneLocalController()
       &StandaloneLocalController::poseCallback, this,
       std::placeholders::_1));
 
-  // test_icp에서 scan 종료 시각의 base_link 기준으로 deskew한 점군이다.
+  // cpp_2d_slam에서 scan 종료 시각의 base_link 기준으로 deskew한 점군이다.
   scan_sub_ = create_subscription<sensor_msgs::msg::PointCloud2>(
     scan_topic_, rclcpp::SensorDataQoS(),
     std::bind(

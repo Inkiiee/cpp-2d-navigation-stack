@@ -1,5 +1,5 @@
-#ifndef __TEST_ICP__ODOM_RECEIVE_NODE_HPP__
-#define __TEST_ICP__ODOM_RECEIVE_NODE_HPP__
+#ifndef __CPP_2D_SLAM__ODOM_RECEIVE_NODE_HPP__
+#define __CPP_2D_SLAM__ODOM_RECEIVE_NODE_HPP__
 
 #include "ros_subscriber_node.hpp"
 #include "nav_msgs/msg/odometry.hpp"

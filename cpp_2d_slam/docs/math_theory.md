@@ -1,6 +1,6 @@
 # 수학 이론 정리
 
-이 문서는 `test_icp` SLAM 시스템에서 사용하는 수학 이론을 정리한다.
+이 문서는 `cpp_2d_slam` SLAM 시스템에서 사용하는 수학 이론을 정리한다.
 
 
 ## 1. 2D 좌표 변환 (Rigid Body Transform)
@@ -365,7 +365,7 @@ $H$는 **sparse matrix** (`Eigen::SparseMatrix`)로 구성하고, `SimplicialLDL
 
 ### 7.5 g2o 최적화 경로
 
-`TEST_ICP_HAS_G2O` 매크로가 정의되면 g2o 라이브러리를 사용한다.
+`CPP_2D_SLAM_HAS_G2O` 매크로가 정의되면 g2o 라이브러리를 사용한다.
 
 - **solver**: `OptimizationAlgorithmLevenberg` + `LinearSolverEigen`
 - **vertex**: `VertexSE2` (2D pose)

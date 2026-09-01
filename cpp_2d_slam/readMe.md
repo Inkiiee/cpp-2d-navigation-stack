@@ -19,7 +19,7 @@
 ## 프로젝트 구조
 
 ```
-test_icp/
+cpp_2d_slam/
 ├── CMakeLists.txt
 ├── package.xml
 ├── readMe.md
@@ -36,7 +36,7 @@ test_icp/
 │   │       ├── scan_match.h              # ICP/NDT/CSM 스캔 매칭 알고리즘 + CloudTree 헬퍼
 │   │       ├── map_backend.h             # Occupancy grid map
 │   │       └── my_pose_graph.h           # Pose graph + 최적화
-│   └── test_icp/
+│   └── cpp_2d_slam/
 │       ├── ros_subscriber_node.hpp       # [신규] CRTP 기반 ROS 구독 노드 템플릿
 │       ├── sensor_receive_node.hpp       # LaserScan 수신 노드
 │       ├── odom_receive_node.hpp         # Odometry 수신 노드
@@ -55,7 +55,7 @@ test_icp/
     │       ├── scan_match.cpp            # 매칭 알고리즘 구현 (CloudTree RAII 사용)
     │       ├── map_backend.cpp           # occupancy map + Bresenham ray tracing
     │       └── my_pose_graph.cpp         # g2o/fallback pose graph 최적화
-    └── test_icp/
+    └── cpp_2d_slam/
         ├── sensor_receive_node.cpp       # LaserScan 수신 → Bridge 전달
         ├── odom_receive_node.cpp         # Odometry 수신 → Bridge 전달
         ├── imu_receive_node.cpp          # IMU 수신 → Bridge 전달
@@ -284,7 +284,7 @@ submap pose 히스토리와 edge를 저장한다.
 
 #### 최적화 경로
 
-`TEST_ICP_HAS_G2O`가 켜져 있으면 g2o 경로를 사용한다.
+`CPP_2D_SLAM_HAS_G2O`가 켜져 있으면 g2o 경로를 사용한다.
 
 - 현재는 `OptimizationAlgorithmLevenberg`
 - linear solver는 `LinearSolverEigen`

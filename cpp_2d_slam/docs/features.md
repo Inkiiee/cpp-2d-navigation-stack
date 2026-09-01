@@ -1,6 +1,6 @@
 # 기능 정리
 
-이 문서는 `test_icp` SLAM 시스템의 기능을 모듈별로 정리한다.
+이 문서는 `cpp_2d_slam` SLAM 시스템의 기능을 모듈별로 정리한다.
 
 
 ## 1. 센서 데이터 수신
@@ -250,7 +250,7 @@ loop edge가 2개 누적될 때마다 `loopOptimize()` 실행.
 
 | 경로 | 조건 | solver |
 |------|------|--------|
-| g2o | `TEST_ICP_HAS_G2O` 정의 시 | Levenberg-Marquardt + LinearSolverEigen |
+| g2o | `CPP_2D_SLAM_HAS_G2O` 정의 시 | Levenberg-Marquardt + LinearSolverEigen |
 | fallback | g2o 없을 때 | Sparse Gauss-Newton + SimplicialLDLT |
 
 ### 7.3 반복 횟수 제한

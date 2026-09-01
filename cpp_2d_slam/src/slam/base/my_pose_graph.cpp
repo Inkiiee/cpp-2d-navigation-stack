@@ -4,7 +4,7 @@
 #include <cmath>
 #include <algorithm>
 #include <Eigen/Sparse>
-#ifdef TEST_ICP_HAS_G2O
+#ifdef CPP_2D_SLAM_HAS_G2O
 #include <g2o/core/block_solver.h>
 #include <g2o/core/optimization_algorithm_levenberg.h>
 #include <g2o/core/robust_kernel_impl.h>
@@ -119,7 +119,7 @@ namespace rcl_pose_graph{
             return;
         }
 
-#ifdef TEST_ICP_HAS_G2O
+#ifdef CPP_2D_SLAM_HAS_G2O
         using LinearSolver = g2o::LinearSolverEigen<g2o::BlockSolverX::PoseMatrixType>;
         auto linear_solver = std::make_unique<LinearSolver>();
         auto block_solver = std::make_unique<g2o::BlockSolverX>(std::move(linear_solver));

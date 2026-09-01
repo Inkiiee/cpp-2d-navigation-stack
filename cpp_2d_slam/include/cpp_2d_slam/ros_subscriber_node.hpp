@@ -1,5 +1,5 @@
-#ifndef __TEST_ICP__ROS_SUBSCRIBER_NODE_HPP__
-#define __TEST_ICP__ROS_SUBSCRIBER_NODE_HPP__
+#ifndef __CPP_2D_SLAM__ROS_SUBSCRIBER_NODE_HPP__
+#define __CPP_2D_SLAM__ROS_SUBSCRIBER_NODE_HPP__
 
 #include <memory>
 #include <string>

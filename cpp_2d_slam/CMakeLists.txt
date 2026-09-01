@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.8)
-project(test_icp)
+project(cpp_2d_slam)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -97,7 +97,7 @@ target_link_libraries(${EXEC_NAME} ${QtLib})
 
 if(G2O_INCLUDE_DIR AND G2O_CORE_LIBRARY AND G2O_STUFF_LIBRARY AND G2O_TYPES_SLAM2D_LIBRARY AND G2O_SOLVER_EIGEN_LIBRARY)
   target_include_directories(${EXEC_NAME} PRIVATE ${G2O_INCLUDE_DIR})
-  target_compile_definitions(${EXEC_NAME} PRIVATE TEST_ICP_HAS_G2O=1)
+  target_compile_definitions(${EXEC_NAME} PRIVATE CPP_2D_SLAM_HAS_G2O=1)
   target_link_libraries(${EXEC_NAME}
     ${G2O_CORE_LIBRARY}
     ${G2O_STUFF_LIBRARY}

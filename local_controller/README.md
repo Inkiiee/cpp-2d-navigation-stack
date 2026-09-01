@@ -1,7 +1,7 @@
 # local_controller
 
 `global_planner`가 발행하는 `/plan`을 `/slam_pose`로 로봇 좌표계에
-변환하고, `test_icp`가 발행하는 `/scan_deskewed` 기반 로컬 코스트맵으로
+변환하고, `cpp_2d_slam`이 발행하는 `/scan_deskewed` 기반 로컬 코스트맵으로
 충돌을 피하며 추종하는 ROS 2 컨트롤러입니다.
 
 Global `/map`이 아직 없어 `/plan`이 나오지 않는 동안에는 `/goal_pose`를
@@ -13,7 +13,7 @@ Global `/map`이 아직 없어 `/plan`이 나오지 않는 동안에는 `/goal_p
 - `/plan`, `/slam_pose`: `map` 좌표계
 - `/scan_deskewed`, `/local_costmap`, 예측 궤적: `base_link` 좌표계
 - scan을 map 좌표계로 누적하지 않으므로 동적 장애물 잔상이 남지 않습니다.
-- `test_icp`의 odom 이력으로 각 beam을 scan 종료 시점에 맞춘 PointCloud2를
+- `cpp_2d_slam`의 odom 이력으로 각 beam을 scan 종료 시점에 맞춘 PointCloud2를
   사용합니다.
 
 ## 입출력
@@ -27,7 +27,7 @@ Global `/map`이 아직 없어 `/plan`이 나오지 않는 동안에는 `/goal_p
 
 ## 제어 과정
 
-1. `test_icp`가 raw scan을 deskew해 `/scan_deskewed`로 발행합니다.
+1. `cpp_2d_slam`이 raw scan을 deskew해 `/scan_deskewed`로 발행합니다.
 2. 매 point cloud마다 로봇 중심 rolling costmap을 새로 만듭니다.
 3. scan endpoint를 `robot_radius + safety_margin`만큼 inflation합니다.
 4. global path의 lookahead point를 `/slam_pose`로 로봇 좌표에 변환합니다.
@@ -79,7 +79,7 @@ ros2 run local_controller standalone_local_controller --ros-args \
 ```bash
 cd /mnt/c/Users/USER/Desktop/test_ros
 source /opt/ros/humble/setup.bash
-colcon build --packages-select test_icp global_planner local_controller
+colcon build --packages-select cpp_2d_slam global_planner local_controller
 source install/setup.bash
 
 ros2 launch local_controller navigation.launch.py

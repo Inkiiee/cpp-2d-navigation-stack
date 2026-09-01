@@ -73,7 +73,7 @@
 - **라이선스**: BSD 2-Clause ("Simplified")
 - **저작권**: Giorgio Grisetti, Rainer Kümmerle, Wolfram Burgard 외
 - **링크**: https://github.com/RainerKuemmerle/g2o
-- **프로젝트 내 사용**: 포즈 그래프 최적화 (Levenberg-Marquardt), 선택적 사용 (`TEST_ICP_HAS_G2O`)
+- **프로젝트 내 사용**: 포즈 그래프 최적화 (Levenberg-Marquardt), 선택적 사용 (`CPP_2D_SLAM_HAS_G2O`)
 - **사용 모듈**: `g2o_core`, `g2o_stuff`, `g2o_types_slam2d`, `g2o_solver_eigen`
 
 #### BSD 2-Clause 주요 조건
