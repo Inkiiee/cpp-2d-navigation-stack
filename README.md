@@ -46,7 +46,7 @@ ros2 launch local_controller navigation.launch.py \
   safety_margin:=0.03
 ```
 
-상세한 알고리즘 설명은 [`cpp_2d_slam/readMe.md`](cpp_2d_slam/readMe.md), 로컬 제어기 설정은 [`local_controller/README.md`](local_controller/README.md)를 참고하세요.
+상세한 알고리즘 설명은 [`cpp_2d_slam/readMe.md`](cpp_2d_slam/README.md), 로컬 제어기 설정은 [`local_controller/README.md`](local_controller/README.md)를 참고하세요.
 
 ## 저장소 구조
 
