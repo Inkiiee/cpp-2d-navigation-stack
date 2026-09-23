@@ -1,9 +1,13 @@
 #include "my_pose_graph.h"
 #include "slam_basic.h"
 
-#include <cmath>
-#include <algorithm>
 #include <Eigen/Sparse>
+
+#include <algorithm>
+#include <cmath>
+#include <limits>
+#include <memory>
+
 #ifdef CPP_2D_SLAM_HAS_G2O
 #include <g2o/core/block_solver.h>
 #include <g2o/core/optimization_algorithm_levenberg.h>
@@ -16,16 +20,51 @@
 namespace rcl_pose_graph_type{
     using rcl_slam_basic_type::RobotBasePose;
 
-    Node::Node(double xx, double yy, double t): RobotBasePose(xx, yy, t) {}
-    Node::Node(const Node& n): RobotBasePose(n.tx, n.ty, n.theta) {}
-    Node::Node(const RobotBasePose& p): RobotBasePose(p.tx, p.ty, p.theta) {}
+    Node::Node(double x, double y, double theta): RobotBasePose(x, y, theta) {}
+    Node::Node(const Node& node): RobotBasePose(node.tx, node.ty, node.theta) {}
+    Node::Node(const RobotBasePose& pose): RobotBasePose(pose.tx, pose.ty, pose.theta) {}
 
-    Edge::Edge(int f, int t, double itx, double ity, double itheta, bool loop):
-        from(f), to(t), info_tx(itx), info_ty(ity), info_theta(itheta), is_loop(loop){}
-    void Edge::set_relative_pose(const Node& n){
-        relative_pose.tx = n.tx;
-        relative_pose.ty = n.ty;
-        relative_pose.theta = n.theta;
+    Edge::Edge(int from_index, int to_index, double tx_info, double ty_info, double theta_info, bool loop):
+        from(from_index),
+        to(to_index),
+        info_tx(tx_info),
+        info_ty(ty_info),
+        info_theta(theta_info),
+        is_loop(loop) {}
+
+    void Edge::set_relative_pose(const Node& node){
+        relative_pose.tx = node.tx;
+        relative_pose.ty = node.ty;
+        relative_pose.theta = node.theta;
+    }
+}
+
+namespace{
+    using rcl_pose_graph_type::Edge;
+    using rcl_pose_graph_type::Node;
+
+    bool isFinitePose(const Node& pose){
+        return std::isfinite(pose.tx)
+            && std::isfinite(pose.ty)
+            && std::isfinite(pose.theta);
+    }
+
+    bool hasValidInformation(const Edge& edge){
+        return std::isfinite(edge.info_tx)
+            && std::isfinite(edge.info_ty)
+            && std::isfinite(edge.info_theta)
+            && edge.info_tx > 0.0
+            && edge.info_ty > 0.0
+            && edge.info_theta > 0.0;
+    }
+
+    bool isValidEdge(const Edge& edge, std::size_t pose_count){
+        return edge.from >= 0
+            && edge.to >= 0
+            && static_cast<std::size_t>(edge.from) < pose_count
+            && static_cast<std::size_t>(edge.to) < pose_count
+            && isFinitePose(edge.relative_pose)
+            && hasValidInformation(edge);
     }
 }
 
@@ -35,42 +74,60 @@ namespace rcl_pose_graph{
     using namespace rcl_pose_graph_type;
 
     void PoseGraph::addPose(double x, double y, double theta){
-        std::lock_guard<std::mutex> lock(mutex_);
-        pose_history.push_back(Node{x, y, theta});
+        addPose(RobotBasePose{x, y, theta});
     }
+
     void PoseGraph::addPose(const RobotBasePose& pose){
+        Node node{pose};
+        if(!isFinitePose(node)){
+            return;
+        }
         std::lock_guard<std::mutex> lock(mutex_);
-        pose_history.push_back(Node{pose.tx, pose.ty, pose.theta});
+        pose_history.push_back(node);
     }
+
     void PoseGraph::addEdge(int from, int to, double info_tx, double info_ty, double info_theta, bool is_loop){
         std::lock_guard<std::mutex> lock(mutex_);
-        if(from < 0 || from >= static_cast<int>(pose_history.size()) || to < 0 || to >= static_cast<int>(pose_history.size()))
-            return;
-
         Edge edge(from, to, info_tx, info_ty, info_theta, is_loop);
-        edge.set_relative_pose(Node{relativePose(pose_history[from], pose_history[to])});
-        edges.push_back(edge);
+        if(from >= 0
+            && to >= 0
+            && static_cast<std::size_t>(from) < pose_history.size()
+            && static_cast<std::size_t>(to) < pose_history.size()){
+            edge.set_relative_pose(Node{relativePose(pose_history[from], pose_history[to])});
+        }
+        if(isValidEdge(edge, pose_history.size())){
+            edges.push_back(edge);
+        }
     }
-    void PoseGraph::addEdge(const rcl_pose_graph_type::Edge& edge){
+
+    void PoseGraph::addEdge(const Edge& edge){
         std::lock_guard<std::mutex> lock(mutex_);
-        edges.push_back(edge);
+        if(isValidEdge(edge, pose_history.size())){
+            edges.push_back(edge);
+        }
     }
+
     size_t PoseGraph::getPoseCount() const{
         std::lock_guard<std::mutex> lock(mutex_);
         return pose_history.size();
     }
+
     RobotBasePose PoseGraph::getPose(int index) const{
         std::lock_guard<std::mutex> lock(mutex_);
-        if(index < 0 || index >= static_cast<int>(pose_history.size()))
+        if(index < 0 || index >= static_cast<int>(pose_history.size())){
             return RobotBasePose();
+        }
         return pose_history[index];
     }
+
     void PoseGraph::setPose(int index, const RobotBasePose& pose){
+        Node node{pose};
+        if(!isFinitePose(node)){
+            return;
+        }
         std::lock_guard<std::mutex> lock(mutex_);
         if(index >= 0 && index < static_cast<int>(pose_history.size())){
-            pose_history[index].tx = pose.tx;
-            pose_history[index].ty = pose.ty;
-            pose_history[index].theta = pose.theta;
+            pose_history[index] = node;
         }
     }
 
@@ -81,43 +138,71 @@ namespace rcl_pose_graph{
 
     std::vector<Node> PoseGraph::getPoseSnapshot(int from, int to) const{
         std::lock_guard<std::mutex> lock(mutex_);
-        int sz = static_cast<int>(pose_history.size());
-        if(from < 0) from = 0;
-        if(to > sz) to = sz;
-        if(from >= to) return {};
+        const int size = static_cast<int>(pose_history.size());
+        from = std::max(from, 0);
+        to = std::min(to, size);
+        if(from >= to){
+            return {};
+        }
         return std::vector<Node>(pose_history.begin() + from, pose_history.begin() + to);
     }
 
     void PoseGraph::setPoses(int from, const std::vector<RobotBasePose>& poses){
+        if(from < 0){
+            return;
+        }
         std::lock_guard<std::mutex> lock(mutex_);
-        int sz = static_cast<int>(pose_history.size());
-        for(int i = 0; i < static_cast<int>(poses.size()) && (from + i) < sz; i++){
-            pose_history[from + i].tx = poses[i].tx;
-            pose_history[from + i].ty = poses[i].ty;
-            pose_history[from + i].theta = poses[i].theta;
+        const int size = static_cast<int>(pose_history.size());
+        for(int i = 0; i < static_cast<int>(poses.size()) && from + i < size; ++i){
+            Node node{poses[i]};
+            if(isFinitePose(node)){
+                pose_history[from + i] = node;
+            }
         }
     }
 
-    // Pose graph optimization 관련 함수들
     Eigen::Vector3d PoseGraph::errorComputeUnlocked(const Edge& edge) const{
         RobotBasePose relative = relativePose(pose_history[edge.from], pose_history[edge.to]);
-
         Eigen::Vector3d predicted(relative.tx, relative.ty, relative.theta);
-        Eigen::Vector3d measurement(edge.relative_pose.tx, edge.relative_pose.ty, edge.relative_pose.theta);
+        Eigen::Vector3d measurement(
+            edge.relative_pose.tx,
+            edge.relative_pose.ty,
+            edge.relative_pose.theta
+        );
         Eigen::Vector3d error = predicted - measurement;
         error(2) = normalizeAngle(error(2));
         return error;
     }
+
     Eigen::Vector3d PoseGraph::errorCompute(const Edge& edge) const{
         std::lock_guard<std::mutex> lock(mutex_);
+        if(!isValidEdge(edge, pose_history.size())){
+            return Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN());
+        }
         return errorComputeUnlocked(edge);
     }
-    void PoseGraph::loopOptimize(int iter, double epsilon){
+
+    bool PoseGraph::loopOptimize(int iter, double epsilon){
         std::lock_guard<std::mutex> lock(mutex_);
-        int N = pose_history.size();
-        if(N <= 1){
-            return;
+        const int pose_count = static_cast<int>(pose_history.size());
+        if(pose_count <= 1){
+            return true;
         }
+        if(iter <= 0 || !std::isfinite(epsilon) || epsilon <= 0.0 || edges.empty()){
+            return false;
+        }
+        for(const auto& pose : pose_history){
+            if(!isFinitePose(pose)){
+                return false;
+            }
+        }
+        for(const auto& edge : edges){
+            if(!isValidEdge(edge, pose_history.size())){
+                return false;
+            }
+        }
+
+        const int max_iter = std::max(3, std::min(iter, 5000 / pose_count));
 
 #ifdef CPP_2D_SLAM_HAS_G2O
         using LinearSolver = g2o::LinearSolverEigen<g2o::BlockSolverX::PoseMatrixType>;
@@ -129,19 +214,26 @@ namespace rcl_pose_graph{
         optimizer.setAlgorithm(algorithm);
         optimizer.setVerbose(false);
 
-        for(int i = 0; i < N; i++){
+        for(int i = 0; i < pose_count; ++i){
             auto* vertex = new g2o::VertexSE2();
             vertex->setId(i);
             vertex->setEstimate(g2o::SE2(pose_history[i].tx, pose_history[i].ty, pose_history[i].theta));
             vertex->setFixed(i == 0);
-            optimizer.addVertex(vertex);
+            if(!optimizer.addVertex(vertex)){
+                delete vertex;
+                return false;
+            }
         }
 
         for(const auto& edge : edges){
             auto* constraint = new g2o::EdgeSE2();
             constraint->setVertex(0, optimizer.vertex(edge.from));
             constraint->setVertex(1, optimizer.vertex(edge.to));
-            constraint->setMeasurement(g2o::SE2(edge.relative_pose.tx, edge.relative_pose.ty, edge.relative_pose.theta));
+            constraint->setMeasurement(g2o::SE2(
+                edge.relative_pose.tx,
+                edge.relative_pose.ty,
+                edge.relative_pose.theta
+            ));
 
             Eigen::Matrix3d information = Eigen::Matrix3d::Zero();
             information(0, 0) = edge.info_tx;
@@ -154,94 +246,146 @@ namespace rcl_pose_graph{
                 kernel->setDelta(1.0);
                 constraint->setRobustKernel(kernel);
             }
-
-            optimizer.addEdge(constraint);
+            if(!optimizer.addEdge(constraint)){
+                delete constraint;
+                return false;
+            }
         }
 
-        optimizer.initializeOptimization();
-        // 포즈가 많아지면 반복 횟수 제한 (N=500 → 최대10회, N=1000 → 최대5회)
-        int max_iter = std::max(3, std::min(iter, 5000 / N));
-        optimizer.optimize(max_iter);
+        if(!optimizer.initializeOptimization()){
+            return false;
+        }
+        if(optimizer.optimize(max_iter) < 0){
+            return false;
+        }
 
-        for(int i = 0; i < N; i++){
+        std::vector<Node> optimized_poses = pose_history;
+        for(int i = 0; i < pose_count; ++i){
             const auto* vertex = dynamic_cast<const g2o::VertexSE2*>(optimizer.vertex(i));
             if(!vertex){
-                continue;
+                return false;
             }
 
             const g2o::SE2& estimate = vertex->estimate();
-            pose_history[i].tx = estimate.translation()[0];
-            pose_history[i].ty = estimate.translation()[1];
-            pose_history[i].theta = normalizeAngle(estimate.rotation().angle());
+            Node optimized{
+                estimate.translation()[0],
+                estimate.translation()[1],
+                normalizeAngle(estimate.rotation().angle())
+            };
+            if(!isFinitePose(optimized)){
+                return false;
+            }
+            optimized_poses[i] = optimized;
         }
-        (void)epsilon;
+        pose_history = std::move(optimized_poses);
+        return true;
 #else
-        // built-in solver: 포즈가 많아지면 반복 횟수 제한
-        int max_iter = std::max(3, std::min(iter, 5000 / N));
+        const std::vector<Node> original_poses = pose_history;
         using Triplet = Eigen::Triplet<double>;
-        for(int i=0; i<max_iter; i++){
-            std::vector<Triplet> triplets;
-            triplets.reserve(edges.size() * 36);  // 각 엣지가 4개 3x3 블록 기여
-            Eigen::VectorXd b = Eigen::VectorXd::Zero(3*N);
 
-            for(const auto& edge: edges){
+        for(int iteration = 0; iteration < max_iter; ++iteration){
+            std::vector<Triplet> triplets;
+            triplets.reserve(edges.size() * 36 + 3);
+            Eigen::VectorXd b = Eigen::VectorXd::Zero(3 * pose_count);
+
+            for(const auto& edge : edges){
                 Eigen::Matrix3d A = Eigen::Matrix3d::Zero();
                 Eigen::Matrix3d B = Eigen::Matrix3d::Zero();
-                Eigen::Matrix3d Info = Eigen::Matrix3d::Zero();
-                Eigen::Vector3d e = errorComputeUnlocked(edge);
+                Eigen::Matrix3d information = Eigen::Matrix3d::Zero();
+                const Eigen::Vector3d error = errorComputeUnlocked(edge);
 
-                if(pose_history.size() <= static_cast<size_t>(std::max(edge.from, edge.to)))
-                    continue;
-                double dx = pose_history[edge.from].tx - pose_history[edge.to].tx;
-                double dy = pose_history[edge.from].ty - pose_history[edge.to].ty;
-                double theta = pose_history[edge.from].theta;
+                const double dx = pose_history[edge.from].tx - pose_history[edge.to].tx;
+                const double dy = pose_history[edge.from].ty - pose_history[edge.to].ty;
+                const double theta = pose_history[edge.from].theta;
 
-                Info(0,0) = edge.info_tx; Info(1,1) = edge.info_ty; Info(2,2) = edge.info_theta;
-                A(0,0) = -std::cos(theta); A(0,1) = -std::sin(theta); A(0,2) = std::sin(theta)*dx - std::cos(theta)*dy;
-                A(1,0) =  std::sin(theta); A(1,1) = -std::cos(theta); A(1,2) = std::cos(theta)*dx + std::sin(theta)*dy;
-                A(2,0) = 0;                A(2,1) = 0;                A(2,2) = -1;
-                B(0,0) =  std::cos(theta); B(0,1) =  std::sin(theta); B(0, 2) = 0;
-                B(1,0) = -std::sin(theta); B(1,1) =  std::cos(theta); B(1, 2) = 0;
-                B(2,0) = 0;                B(2,1) = 0;                B(2, 2) = 1;
+                information(0, 0) = edge.info_tx;
+                information(1, 1) = edge.info_ty;
+                information(2, 2) = edge.info_theta;
+                A(0, 0) = -std::cos(theta);
+                A(0, 1) = -std::sin(theta);
+                A(0, 2) = std::sin(theta) * dx - std::cos(theta) * dy;
+                A(1, 0) = std::sin(theta);
+                A(1, 1) = -std::cos(theta);
+                A(1, 2) = std::cos(theta) * dx + std::sin(theta) * dy;
+                A(2, 2) = -1.0;
+                B(0, 0) = std::cos(theta);
+                B(0, 1) = std::sin(theta);
+                B(1, 0) = -std::sin(theta);
+                B(1, 1) = std::cos(theta);
+                B(2, 2) = 1.0;
 
-                int fi = edge.from * 3;
-                int ti = edge.to * 3;
-
-                Eigen::Matrix3d AtIA = A.transpose() * Info * A;
-                Eigen::Matrix3d BtIB = B.transpose() * Info * B;
-                Eigen::Matrix3d AtIB = A.transpose() * Info * B;
-                Eigen::Matrix3d BtIA = B.transpose() * Info * A;
-
-                for(int r=0; r<3; r++) for(int c=0; c<3; c++){
-                    triplets.emplace_back(fi+r, fi+c, AtIA(r,c));
-                    triplets.emplace_back(ti+r, ti+c, BtIB(r,c));
-                    triplets.emplace_back(fi+r, ti+c, AtIB(r,c));
-                    triplets.emplace_back(ti+r, fi+c, BtIA(r,c));
+                const int from_index = edge.from * 3;
+                const int to_index = edge.to * 3;
+                const Eigen::Matrix3d AtIA = A.transpose() * information * A;
+                const Eigen::Matrix3d BtIB = B.transpose() * information * B;
+                const Eigen::Matrix3d AtIB = A.transpose() * information * B;
+                const Eigen::Matrix3d BtIA = B.transpose() * information * A;
+                if(!error.allFinite()
+                    || !AtIA.allFinite()
+                    || !BtIB.allFinite()
+                    || !AtIB.allFinite()
+                    || !BtIA.allFinite()){
+                    pose_history = original_poses;
+                    return false;
                 }
-                b.segment<3>(fi) += A.transpose() * Info * e;
-                b.segment<3>(ti) += B.transpose() * Info * e;
+
+                for(int row = 0; row < 3; ++row){
+                    for(int column = 0; column < 3; ++column){
+                        triplets.emplace_back(from_index + row, from_index + column, AtIA(row, column));
+                        triplets.emplace_back(to_index + row, to_index + column, BtIB(row, column));
+                        triplets.emplace_back(from_index + row, to_index + column, AtIB(row, column));
+                        triplets.emplace_back(to_index + row, from_index + column, BtIA(row, column));
+                    }
+                }
+                b.segment<3>(from_index) += A.transpose() * information * error;
+                b.segment<3>(to_index) += B.transpose() * information * error;
             }
 
-            // Anchor first node to prevent singular system
-            for(int k=0; k<3; k++) triplets.emplace_back(k, k, 1e6);
+            for(int axis = 0; axis < 3; ++axis){
+                triplets.emplace_back(axis, axis, 1e6);
+            }
 
-            Eigen::SparseMatrix<double> H(3*N, 3*N);
+            Eigen::SparseMatrix<double> H(3 * pose_count, 3 * pose_count);
             H.setFromTriplets(triplets.begin(), triplets.end());
+            H.makeCompressed();
 
             Eigen::SimplicialLDLT<Eigen::SparseMatrix<double>> solver;
             solver.compute(H);
-            Eigen::VectorXd delta = solver.solve(-b);
-            for(int i=0; i<N; i++){
-                int idx = i * 3;
-                pose_history[i].tx += delta(idx);
-                pose_history[i].ty += delta(idx + 1);
-                pose_history[i].theta = normalizeAngle(pose_history[i].theta + delta(idx + 2));
+            if(solver.info() != Eigen::Success){
+                pose_history = original_poses;
+                return false;
             }
-            double max_delta = delta.cwiseAbs().maxCoeff();
+
+            const Eigen::VectorXd delta = solver.solve(-b);
+            if(solver.info() != Eigen::Success || !delta.allFinite()){
+                pose_history = original_poses;
+                return false;
+            }
+
+            for(int i = 0; i < pose_count; ++i){
+                const int index = i * 3;
+                Node updated{
+                    pose_history[i].tx + delta(index),
+                    pose_history[i].ty + delta(index + 1),
+                    normalizeAngle(pose_history[i].theta + delta(index + 2))
+                };
+                if(!isFinitePose(updated)){
+                    pose_history = original_poses;
+                    return false;
+                }
+                pose_history[i] = updated;
+            }
+
+            const double max_delta = delta.cwiseAbs().maxCoeff();
+            if(!std::isfinite(max_delta)){
+                pose_history = original_poses;
+                return false;
+            }
             if(max_delta < epsilon){
                 break;
             }
         }
+        return true;
 #endif
     }
 }

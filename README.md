@@ -19,7 +19,7 @@ ROS 2 Humble 환경의 워크스페이스 `src` 아래에서 저장소를 clone�
 ```bash
 mkdir -p ~/ros2_ws/src
 cd ~/ros2_ws/src
-git clone https://github.com/Inkiiee/cpp-2d-slam.git
+git clone https://github.com/Inkiiee/cpp-2d-navigation-stack.git
 
 cd ~/ros2_ws
 source /opt/ros/humble/setup.bash

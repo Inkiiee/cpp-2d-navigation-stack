@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up ROS 2 Humble
+        uses: ros-tooling/setup-ros@v0.7
+        with:
+          required-ros-distributions: humble
+
+      - name: Install Qt 6
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes qt6-base-dev
+
+      - name: Build and test packages
+        uses: ros-tooling/action-ros-ci@v0.3
+        with:
+          package-name: cpp_2d_slam global_planner local_controller
+          target-ros2-distro: humble

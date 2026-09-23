@@ -11,6 +11,7 @@
 #include <cmath>
 #include <chrono>
 #include <memory>
+#include <mutex>
 #include <vector>
 #include <atomic>
 
@@ -84,13 +85,16 @@ public:
                     double origin_x, double origin_y, double resolution)
     {
         auto now = std::chrono::steady_clock::now();
-        if (map_published_once_) {
-            auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                now - last_map_time_).count();
-            if (elapsed_ms < 2000) return;
+        {
+            std::lock_guard<std::mutex> lock(map_publish_mutex_);
+            if (map_published_once_) {
+                auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    now - last_map_time_).count();
+                if (elapsed_ms < 2000) return;
+            }
+            last_map_time_ = now;
+            map_published_once_ = true;
         }
-        last_map_time_ = now;
-        map_published_once_ = true;
 
         nav_msgs::msg::OccupancyGrid grid;
         grid.header.stamp = this->now();
@@ -115,6 +119,7 @@ private:
 
     std::chrono::steady_clock::time_point last_map_time_;
     bool map_published_once_ = false;
+    std::mutex map_publish_mutex_;
 };
 
 #endif // __RCL_ROS_PUBLISHER_NODE_H__
