@@ -6,10 +6,13 @@
 #include "my_pose_graph.h"
 
 #include <QObject>
+#include <QMetaType>
 #include <atomic>
 #include <mutex>
 #include <vector>
 #include <Eigen/Dense>
+
+Q_DECLARE_METATYPE(Eigen::Matrix3d)
 
 namespace rcl_loop_detecter{
     class LoopDetecter: public QObject{

@@ -167,18 +167,25 @@ namespace rcl_loop_detecter{
                         }
 
                         auto t_opt0 = std::chrono::steady_clock::now();
-                        pose_graph->loopOptimize();
+                        const bool optimization_succeeded = pose_graph->loopOptimize();
                         auto t_opt1 = std::chrono::steady_clock::now();
-                        pending_loop_edges_ = 0;
-
-                        Node new_node = pose_graph->getPose(last_node_index);
-                        Eigen::Matrix3d delta = calDeltaTransform(old_node, new_node);
 
                         auto us_opt = std::chrono::duration_cast<std::chrono::microseconds>(t_opt1 - t_opt0).count();
                         qDebug() << "[TIMING loopOptimize] poses=" << pose_graph->getPoseCount()
                                  << " time=" << us_opt << "us (" << us_opt / 1000 << "ms)";
 
-                        emit optimizedPoseUpdated(last_node_index, delta);
+                        if(optimization_succeeded){
+                            pending_loop_edges_ = 0;
+                            Node new_node = pose_graph->getPose(last_node_index);
+                            Eigen::Matrix3d delta = calDeltaTransform(old_node, new_node);
+                            if(delta.allFinite()){
+                                emit optimizedPoseUpdated(last_node_index, delta);
+                            }else{
+                                qWarning() << "Pose graph produced a non-finite correction; update ignored";
+                            }
+                        }else{
+                            qWarning() << "Pose graph optimization failed; existing poses were preserved";
+                        }
                     }
 
                     qDebug()<<"Loop closure detected between pose "<<current_index<<" and pose "<<candidate_index

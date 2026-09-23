@@ -51,7 +51,7 @@ namespace rcl_pose_graph{
 
         // Pose graph optimization 관련 함수들
         Eigen::Vector3d errorCompute(const rcl_pose_graph_type::Edge& edge) const;
-        void loopOptimize(int iter=20, double epsilon=1e-6);
+        bool loopOptimize(int iter=20, double epsilon=1e-6);
     };
 }
 

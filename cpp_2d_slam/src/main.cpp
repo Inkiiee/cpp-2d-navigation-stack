@@ -1,7 +1,7 @@
 #include <QApplication>
+#include <QTimer>
 #include <thread>
 #include <memory>
-#include <csignal>
 
 #include "bridge.h"
 #include "imu_receive_node.hpp"
@@ -12,15 +12,6 @@
 #include "plan_receive_node.hpp"
 #include "teleopt.hpp"
 #include "ros_publisher_node.hpp"
-
-bool is_end = false;
-
-void signal_handler(int signal) {
-    if (signal == SIGINT) {
-        is_end = true;
-        rclcpp::shutdown();
-    }
-}
 
 int main(int argc, char *argv[])
 {
@@ -34,8 +25,6 @@ int main(int argc, char *argv[])
         non_ros_args_c_strings.push_back(&arg.front());
     int non_ros_argc = static_cast<int>(non_ros_args_c_strings.size());
     QApplication app(non_ros_argc, non_ros_args_c_strings.data());
-
-    std::signal(SIGINT, signal_handler);
 
     Bridge bridge;
     auto ros_pub = std::make_shared<RosPublisherNode>();
@@ -51,15 +40,24 @@ int main(int argc, char *argv[])
     // auto keyInputMon = std::make_shared<KeyInputMon>(sharedMemPtr);
     // auto myTelNode = std::make_shared<MyTelNode>(sharedMemPtr);
 
-    std::thread t1([odomLoader, receiver, imuLoader, planReceiver, ros_pub](){
-        while(!is_end){
-            rclcpp::spin_some(imuLoader);
-            rclcpp::spin_some(odomLoader);
-            rclcpp::spin_some(receiver);
-            rclcpp::spin_some(planReceiver);
-            rclcpp::spin_some(ros_pub);
+    rclcpp::executors::SingleThreadedExecutor ros_executor;
+    ros_executor.add_node(imuLoader);
+    ros_executor.add_node(odomLoader);
+    ros_executor.add_node(receiver);
+    ros_executor.add_node(planReceiver);
+    ros_executor.add_node(ros_pub);
+
+    std::thread t1([&ros_executor](){
+        ros_executor.spin();
+    });
+
+    QTimer shutdown_timer;
+    QObject::connect(&shutdown_timer, &QTimer::timeout, &app, [&app](){
+        if(!rclcpp::ok()){
+            app.quit();
         }
     });
+    shutdown_timer.start(50);
 
     // std::thread t2([keyInputMon](){
     //     keyInputMon->process();
@@ -75,7 +73,9 @@ int main(int argc, char *argv[])
     int ret = app.exec();
 
     //종료.
-    is_end = true;
+    if(rclcpp::ok()){
+        rclcpp::shutdown();
+    }
     if(t1.joinable()){
         t1.join();
     }
@@ -85,7 +85,6 @@ int main(int argc, char *argv[])
     // if(t3.joinable()){
     //     t3.join();
     // }
-    rclcpp::shutdown();
     // keyInputMon->end();
     return ret;
 }

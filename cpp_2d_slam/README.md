@@ -79,7 +79,7 @@ graph LR
         B[Bridge]
         SMB[ScanMatchBackend]
         LD[LoopDetecter]
-        SS[SlamSystem]
+        MR[MapRebuildWorker]
         P[Painter]
     end
 
@@ -94,10 +94,10 @@ graph LR
     SMB -- predictedPose --> P
     SMB -- scanUpdated --> P
     SMB -- subMapUpdated --> LD
-    SMB -- rebuildMapRequested --> SS
+    SMB -- rebuildMapRequested --> MR
 
     LD -- optimizedPoseUpdated --> SMB
-    SS -- rebuildMap --> SMB
+    MR -- rebuildMap --> SMB
 ```
 
 ### 클래스 상속 구조
@@ -341,7 +341,7 @@ Qt 위젯 기반 디버그 시각화 계층이다.
 
 - backend thread: `ScanMatchBackend`
 - loop thread: `LoopDetecter`
-- slam thread: `SlamSystem`
+- map rebuild thread: `MapRebuildWorker`
 - GUI thread: `Painter`
 
 중요한 점은 `world_map`, `sub_maps`, `pose_graph`, `map_x/y/theta` 일부 상태가 여러 쓰레드에서 공유된다는 점이다.
@@ -425,7 +425,7 @@ Qt 위젯 기반 디버그 시각화 계층이다.
 
 -> `rebuildMapRequested` emit
 
-`SlamSystem::rebuildMap`
+`MapRebuildWorker::rebuildMap`
 
 -> world map clear
 

@@ -331,7 +331,7 @@ world 좌표 → pixel 좌표 변환 (`worldToPixel`):
 | t3 (std::thread) | MyTelNode | cmd_vel 퍼블리시 |
 | QThread 1 | ScanMatchBackend | 스캔 매칭 + 맵 관리 |
 | QThread 2 | LoopDetecter | 루프 탐지 |
-| QThread 3 | SlamSystem | 맵 재구성 |
+| QThread 3 | MapRebuildWorker | 맵 재구성 |
 | GUI thread | Painter | Qt 렌더링 |
 
 ### 10.2 동기화
@@ -352,5 +352,5 @@ world 좌표 → pixel 좌표 변환 (`worldToPixel`):
 | ScanMatchBackend | predictedPose | Painter | predictedPoseUpdate | Queued |
 | ScanMatchBackend | scanUpdated | Painter | scanUpdate | Queued |
 | ScanMatchBackend | subMapUpdated | LoopDetecter | detectLoop | Queued |
-| ScanMatchBackend | rebuildMapRequested | SlamSystem | rebuildMap | Queued |
+| ScanMatchBackend | rebuildMapRequested | MapRebuildWorker | rebuildMap | Queued |
 | LoopDetecter | optimizedPoseUpdated | ScanMatchBackend | poseOptimized | Queued |

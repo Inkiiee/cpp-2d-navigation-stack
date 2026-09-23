@@ -54,14 +54,9 @@ set(QtLib
   Eigen3::Eigen
 )
 
-set(CPP_SOURCES
-  src/main.cpp
+set(SLAM_CORE_SOURCES
   src/painter.cpp
   src/bridge.cpp
-  src/${PROJECT_NAME}/imu_receive_node.cpp
-  src/${PROJECT_NAME}/sensor_receive_node.cpp
-  src/${PROJECT_NAME}/odom_receive_node.cpp
-  src/${PROJECT_NAME}/plan_receive_node.cpp
   src/${PROJECT_NAME}/teleopt.cpp
   src/slam/base/scan_match.cpp
   src/slam/base/slam_basic.cpp
@@ -77,28 +72,42 @@ set(CPP_SOURCES
   include/slam/slam.h
 )
 
-set(EXEC_NAME
-  ${PROJECT_NAME}
+set(APP_SOURCES
+  src/main.cpp
+  src/${PROJECT_NAME}/imu_receive_node.cpp
+  src/${PROJECT_NAME}/sensor_receive_node.cpp
+  src/${PROJECT_NAME}/odom_receive_node.cpp
+  src/${PROJECT_NAME}/plan_receive_node.cpp
 )
 
-add_executable(${EXEC_NAME}
-  ${CPP_SOURCES}
+add_library(${PROJECT_NAME}_core STATIC
+  ${SLAM_CORE_SOURCES}
 )
 
-set_target_properties(${EXEC_NAME} PROPERTIES
-  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
-)
-
-ament_target_dependencies(${EXEC_NAME}
+ament_target_dependencies(${PROJECT_NAME}_core
   ${ROS_DEPEND}
 )
 
-target_link_libraries(${EXEC_NAME} ${QtLib})
+target_link_libraries(${PROJECT_NAME}_core ${QtLib})
+
+add_executable(${PROJECT_NAME}
+  ${APP_SOURCES}
+)
+
+set_target_properties(${PROJECT_NAME} PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+)
+
+ament_target_dependencies(${PROJECT_NAME}
+  ${ROS_DEPEND}
+)
+
+target_link_libraries(${PROJECT_NAME} ${PROJECT_NAME}_core)
 
 if(G2O_INCLUDE_DIR AND G2O_CORE_LIBRARY AND G2O_STUFF_LIBRARY AND G2O_TYPES_SLAM2D_LIBRARY AND G2O_SOLVER_EIGEN_LIBRARY)
-  target_include_directories(${EXEC_NAME} PRIVATE ${G2O_INCLUDE_DIR})
-  target_compile_definitions(${EXEC_NAME} PRIVATE CPP_2D_SLAM_HAS_G2O=1)
-  target_link_libraries(${EXEC_NAME}
+  target_include_directories(${PROJECT_NAME}_core PRIVATE ${G2O_INCLUDE_DIR})
+  target_compile_definitions(${PROJECT_NAME}_core PRIVATE CPP_2D_SLAM_HAS_G2O=1)
+  target_link_libraries(${PROJECT_NAME}_core
     ${G2O_CORE_LIBRARY}
     ${G2O_STUFF_LIBRARY}
     ${G2O_TYPES_SLAM2D_LIBRARY}
@@ -109,9 +118,22 @@ else()
   message(STATUS "g2o not found: using built-in pose graph optimizer")
 endif()
 
+if(BUILD_TESTING)
+  find_package(ament_cmake_gtest REQUIRED)
+
+  ament_add_gtest(test_cpp_2d_slam
+    test/test_pose_graph.cpp
+    test/test_slam_threads.cpp
+  )
+  target_link_libraries(test_cpp_2d_slam ${PROJECT_NAME}_core)
+  set_tests_properties(test_cpp_2d_slam PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+  )
+endif()
+
 install(
   TARGETS
-    ${EXEC_NAME}
+    ${PROJECT_NAME}
   DESTINATION lib/${PROJECT_NAME}
 )
 
