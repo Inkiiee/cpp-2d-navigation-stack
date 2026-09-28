@@ -506,20 +506,26 @@ namespace rcl_scan_match{
         origin_p.tx = tx; origin_p.ty = ty; origin_p.theta = theta;
 
         static double resolutions[] = {1.0, 0.5, 0.3, 0.1, 0.05};
-        Param p{tx, ty, theta, 0};
-        double rmse_origin = cal_rmse(curr_x, curr_y, prev_x, prev_y, origin_p);
-        for(int i=0; i<5; i++){
-            p = runNDT(prev_x, prev_y, curr_x, curr_y, p.tx, p.ty, p.theta, resolutions[i], step, maxIter, epsilon);
-            double rmse_ndt = cal_rmse(curr_x, curr_y, prev_x, prev_y, p);
+        Param best_p = origin_p;
+        double best_rmse = cal_rmse(curr_x, curr_y, prev_x, prev_y, origin_p);
+        best_p.rmse = best_rmse;
 
-            if(rmse_ndt < rmse_origin){
-                p.theta = normalizeAngle(p.theta);
-                p.rmse = rmse_ndt;
-                return p;
+        for(double resolution : resolutions){
+            Param candidate = runNDT(
+                prev_x, prev_y, curr_x, curr_y,
+                best_p.tx, best_p.ty, best_p.theta,
+                resolution, step, maxIter, epsilon);
+            candidate.theta = normalizeAngle(candidate.theta);
+
+            double candidate_rmse = cal_rmse(curr_x, curr_y, prev_x, prev_y, candidate);
+            if(std::isfinite(candidate_rmse) && candidate_rmse < best_rmse){
+                candidate.rmse = candidate_rmse;
+                best_p = candidate;
+                best_rmse = candidate_rmse;
             }
         }
-        origin_p.rmse = rmse_origin;
-        return origin_p;
+
+        return best_p;
     }
 
     // ─── Correlative Scan Matcher (Karto-style) ────────────────────────────────

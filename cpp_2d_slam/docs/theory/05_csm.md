@@ -3,7 +3,7 @@
 
 ## 개요
 
-CSM은 가능한 모든 후보 pose를 격자 위에서 **전수 탐색(brute-force)**하여 가장 높은 점수의 pose를 찾는 스캔 매칭 알고리즘이다.
+CSM은 설정한 이동·회전 범위와 이산 간격 안의 후보 pose를 격자 위에서 **전수 탐색(brute-force)**하여 가장 높은 점수의 pose를 찾는 스캔 매칭 알고리즘이다. 따라서 결과는 연속 pose 공간 전체의 전역 최적해가 아니라, 주어진 유한 탐색 격자 안의 최적 후보이다.
 
 Karto SLAM (SRI International)에서 사용된 방식이며, Olson (2009)의 Real-Time Correlative Scan Matching에 기초한다.
 
@@ -13,7 +13,7 @@ Karto SLAM (SRI International)에서 사용된 방식이며, Olson (2009)의 Rea
 | 항목 | ICP/NDT | CSM |
 |------|---------|-----|
 | 방식 | 반복적 최적화 (gradient 기반) | 전수 탐색 (enumerate) |
-| 초기값 의존성 | **높음** (지역 최소해 위험) | **낮음** (탐색 범위 내 전역 최적) |
+| 초기값 의존성 | **높음** (지역 최소해 위험) | **상대적으로 낮음** (설정한 탐색 격자 안에서 후보 열거) |
 | 정밀도 | 높음 | 격자 해상도에 의존 |
 | 속도 | 빠름 (수렴 시) | 느림 (탐색 범위에 비례) |
 | 역할 | Fine alignment | **Coarse alignment** |
@@ -69,6 +69,8 @@ $$
 $$
 
 score가 가장 높은 $\xi$가 최적 결과다.
+
+온라인 경로의 LUT는 현재 reference 점군으로 CSM 직전에 만들며, 해당 CSM 호출이 끝난 뒤에는 재사용하지 않는다. reference가 달라지면 LUT의 원점·크기·점수장도 달라지기 때문이다.
 
 
 ### 3단계: Coarse-to-Fine 탐색

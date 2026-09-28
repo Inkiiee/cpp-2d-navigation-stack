@@ -269,14 +269,14 @@ step size 클리핑 후 $\xi \leftarrow \xi - \Delta\xi$로 갱신한다.
 ### 5.4 멀티 해상도 NDT
 
 coarse-to-fine 전략으로 해상도 $[1.0, 0.5, 0.3, 0.1, 0.05]$을 순차 적용.
-이전 해상도의 결과를 다음 해상도의 초기값으로 사용한다.
+각 해상도에서 RMSE가 개선된 결과만 best pose로 채택하고, 개선되지 않은 단계가 있어도 나머지 해상도까지 순회한다. 이 helper는 현재 온라인 위치 추정 경로에서는 사용하지 않으며, 온라인 경로는 단일 해상도 `runNDT`를 호출한다.
 
 **사용 위치**: `scan_match.cpp::runNDT`, `scan_match.cpp::runNDTAndGetBestPose`
 
 
 ## 6. CSM (Correlative Scan Matching)
 
-격자 기반 전수 탐색(brute-force search)으로 최적 pose를 찾는다.
+정해진 이동·회전 범위와 이산 간격 안에서 후보를 열거하여 가장 높은 점수의 pose를 찾는다. 결과는 연속 공간의 전역 최적해가 아니라, 설정한 유한 탐색 격자 안의 최적 후보이다.
 
 ### 6.1 Lookup Table (LUT)
 

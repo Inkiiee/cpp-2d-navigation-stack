@@ -87,8 +87,9 @@ map_θ += Δθ
 
 ```
 scan 수신
-  ├─ 이동량 부족 → local_map 누적만
-  └─ 이동량 충분 ─┬─ reference map 구성 (local_map + world_map 근처 점)
+  └─ latest-value mailbox (pending 최대 1개)
+      ├─ 이동량 부족 → local_map 누적만
+      └─ 이동량 충분 ─┬─ reference map 구성 (local_map + world_map 근처 점)
                    ├─ CSM 필요? ─ Yes → LUT 빌드 + CSM → NDT 정밀 보정
                    │              └ No  → NDT만 수행
                    ├─ 점프 제한 (α=0.3 가중 평균)
@@ -108,7 +109,7 @@ scan 수신
 
 | 조건 | 처리 |
 |------|------|
-| 이동 > 0.15m 또는 회전 > 0.1rad 또는 LUT 무효 | CSM → NDT |
+| 이동 > 0.15m 또는 회전 > 0.1rad 또는 reference map 변경 | CSM → NDT |
 | 그 외 | NDT만 |
 
 ### 3.5 점프 제한
@@ -123,7 +124,7 @@ scan 수신
 
 | 파라미터 | 값 |
 |----------|-----|
-| 생성 주기 | 10 프레임마다 |
+| 생성 주기 | 5 프레임마다 |
 
 생성 절차:
 1. local_map의 점군을 world 좌표로 읽음
@@ -133,12 +134,13 @@ scan 수신
 5. 이전 노드와 odom 엣지 연결
 6. local_map 초기화
 
-### 3.7 캐싱 전략
+### 3.7 backlog와 캐싱 전략
 
-| 캐시 | 무효화 조건 | 용도 |
-|------|------------|------|
-| `cached_lut_` | 맵 변경 또는 CSM 호출 시 | LUT 재활용 |
-| `cached_world_x/y_` | 맵 변경 또는 0.5m 이상 이동 | world_map ref 점군 |
+| 상태 | 갱신 조건 | 용도 |
+|------|----------|------|
+| `LatestScanMailbox` | scan 수신 시 최신값으로 덮어쓰기 | pending scan을 최대 1개로 제한 |
+| CSM LUT | CSM 호출 시 현재 reference로 생성 | 해당 CSM 호출에서만 사용 |
+| `cached_world_x/y_` | 맵 변경 또는 0.5m 이상 이동 | world_map reference 점군 재사용 |
 
 
 ## 4. 스캔 매칭 알고리즘 (`ScanMatcher`)
@@ -153,6 +155,8 @@ scan 수신
 | NDT | `runNDT` | 정규 분포 기반 정합 |
 | Multi-Resolution NDT | `runNDTAndGetBestPose` | coarse-to-fine NDT |
 | CSM | `runCSM` | 격자 전수 탐색 |
+
+온라인 위치 추정은 조건에 따라 `runCSM`을 실행한 뒤 단일 해상도 `runNDT`로 보정하거나, odometry 예측에서 바로 `runNDT`를 실행한다. `runNDTAndGetBestPose`는 모든 해상도를 순회하면서 RMSE가 개선된 결과만 채택하는 별도 helper이며 현재 온라인 경로에서는 호출하지 않는다.
 
 ### 4.2 기본 파라미터
 
@@ -340,14 +344,14 @@ world 좌표 → pixel 좌표 변환 (`worldToPixel`):
 |--------|----------|
 | `shared_data_mutex_` | world_map, sub_maps, pose_graph, map_x/y/theta |
 | `PoseGraph::mutex_` | pose_history, edges |
-| `scan_mutex_` | pending_scan 버퍼 |
+| `LatestScanMailbox::mutex_` | 최신 pending scan과 backend 작업 예약 상태 |
 | `pose_mutex_` (Bridge) | odom_history, imu_history |
 
 ### 10.3 Signal-Slot 연결
 
 | 발신 | Signal | 수신 | Slot | 연결 |
 |------|--------|------|------|------|
-| Bridge | scanDataReceived | ScanMatchBackend | lidarUpdate | Queued |
+| Bridge | scanDataReceived | ScanMatchBackend | lidarUpdate | Direct (mailbox 복사 및 작업 예약만) |
 | Bridge | odomDataReceived | ScanMatchBackend | odomUpdate | Queued |
 | ScanMatchBackend | predictedPose | Painter | predictedPoseUpdate | Queued |
 | ScanMatchBackend | scanUpdated | Painter | scanUpdate | Queued |

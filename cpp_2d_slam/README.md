@@ -151,7 +151,9 @@ classDiagram
 
 ```mermaid
 flowchart TD
-    A[scan 수신] --> B{이동량 충분?}
+    A[scan 수신] --> A2[latest-value mailbox 덮어쓰기]
+    A2 --> A3[backend 작업 최대 1개 예약]
+    A3 --> B{이동량 충분?}
     B -- No --> C[local_map에 누적만]
     B -- Yes --> D[reference map 구성]
     D --> E{CSM 필요?}
@@ -229,7 +231,9 @@ odom 변화량을 계산해 현재 `map_*` pose에 반영한다.
 
 #### `lidarUpdate`
 
-실제 메인 파이프라인이다.
+센서 producer에서 호출되는 `lidarUpdate`는 스캔을 latest-value mailbox에 복사하고 backend 작업을 예약하는 역할만 한다. 이미 작업이 예약되었거나 실행 중이면 새 스캔은 pending 값을 덮어쓴다. 따라서 pending scan은 최대 1개이며, Qt event queue에는 스캔마다 무거운 매칭 작업이 추가되지 않는다.
+
+실제 메인 파이프라인은 backend thread의 `processLatestScan`과 `processScan`에서 실행된다.
 
 1. 일정 프레임마다 `local_map`을 submap으로 승격
 2. 승격 직전 월드 좌표의 점들을 `world_map`에 반영
@@ -243,7 +247,7 @@ odom 변화량을 계산해 현재 `map_*` pose에 반영한다.
 
 현재 구현은 매 프레임 CSM을 돌리지 않는다.
 
-- 이동량이 충분히 크거나 LUT가 무효화되면 `CSM -> NDT`
+- 이동량이 충분히 크거나 reference map 변경으로 `force_csm_`이 설정되면 `CSM -> NDT`
 - 그렇지 않으면 `NDT`만 수행
 
 의도는 다음과 같다.
@@ -381,6 +385,10 @@ Qt 위젯 기반 디버그 시각화 계층이다.
 
 -> `ScanMatchBackend::lidarUpdate`
 
+-> latest-value mailbox에 최신 scan 저장
+
+-> backend thread의 `processLatestScan` 예약
+
 -> scan matching 수행
 
 -> `local_map` 누적
@@ -445,9 +453,10 @@ Qt 위젯 기반 디버그 시각화 계층이다.
 
 ### 현재 구현상 눈에 띄는 특징
 
-- submap 생성 주기는 현재 `10` 프레임이다.
-- `cached_lut_`는 저장되지만 실제 재사용보다는 rebuild 여부 판단 플래그에 가깝다.
-- `temp_wm`로 local/world 점들을 합친 뒤 reference를 구성한다.
+- submap 생성 주기는 현재 `5` 프레임이다.
+- CSM LUT는 현재 reference 점군에 종속되므로 CSM을 호출하는 프레임에서 생성해 해당 호출에만 사용한다.
+- `match_ref_map_`로 local/world 점들을 합친 뒤 reference를 구성한다.
+- world reference 점군은 맵 변경 또는 로봇이 캐시 중심에서 0.5m 이상 이동했을 때 갱신한다.
 - matching 결과가 odom 예측에서 너무 멀면 `alpha = 0.3`으로 제한한다.
 
 
@@ -493,10 +502,15 @@ g2o가 없을 때도 이제 dense Hessian이 아니라 sparse Hessian을 쓴다.
 g2o를 쓴다면 `LinearSolverCholmod` 또는 `LinearSolverCSparse`가 일반적으로 더 빠르다.
 현재 g2o 경로는 동작은 하지만 sparse graph 관점에서 최적은 아니다.
 
-### 4. `cached_lut_` 활용도
+### 4. LUT 수명과 reference 캐시
 
-이름상 캐시처럼 보이지만 현재 `runCSM`은 내부에서 직접 ref를 받는다.
-즉, 저장된 `cached_lut_`를 실제 scoring에 재사용하는 구조는 아직 완성형이 아니다.
+LUT는 생성 당시 reference 점군의 경계와 점수장을 담으므로, reference가 바뀐 뒤 재사용하면 오래된 점수장을 조회하게 된다. 현재 구현은 CSM 실행 시 현재 reference로 LUT를 만들고 그 호출이 끝나면 폐기한다.
+
+대신 비용이 큰 world reference 조회 결과인 `cached_world_x_`, `cached_world_y_`를 캐시한다. 이 캐시는 맵 변경 또는 캐시 중심에서 0.5m 이상 이동할 때 무효화한다.
+
+### 5. 멀티 해상도 NDT의 사용 범위
+
+온라인 경로는 CSM 결과 또는 odometry 예측을 초기값으로 단일 해상도 `runNDT`를 호출한다. `runNDTAndGetBestPose`는 별도의 실험용 helper이며, 모든 해상도를 순회하면서 RMSE가 개선된 결과만 다음 단계의 기준으로 채택한다.
 
 
 ## 파일별 요약

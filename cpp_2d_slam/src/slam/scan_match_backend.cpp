@@ -19,7 +19,9 @@ namespace rcl_scan_match_backend{
         odom_x = 0, odom_y = 0, odom_theta = 0;
         imu_theta = 0;
 
-        QObject::connect(bridge, &Bridge::scanDataReceived, this, &ScanMatchBackend::lidarUpdate, Qt::ConnectionType::QueuedConnection);
+        // lidarUpdate only copies into the mailbox. Running it in the producer
+        // thread prevents a payload-bearing event from accumulating per scan.
+        QObject::connect(bridge, &Bridge::scanDataReceived, this, &ScanMatchBackend::lidarUpdate, Qt::ConnectionType::DirectConnection);
         QObject::connect(bridge, &Bridge::odomDataReceived, this, &ScanMatchBackend::odomUpdate, Qt::ConnectionType::QueuedConnection);
         // QObject::connect(bridge, &Bridge::imuHeadingReceived, this, &ScanMatchBackend::imuUpdate, Qt::ConnectionType::QueuedConnection);
     }
@@ -94,7 +96,7 @@ namespace rcl_scan_match_backend{
         }
 
         ref_cache_valid_ = false;  // rebuildMap이 world_map을 교체하므로
-        lut_valid_ = false;
+        force_csm_ = true;
         emit rebuildMapRequested();
     }
 
@@ -104,33 +106,31 @@ namespace rcl_scan_match_backend{
     }
 
     void ScanMatchBackend::lidarUpdate(const ScanAxis& xs, const ScanAxis& ys){
-        // ── 1. 항상 최신 스캔을 버퍼에 저장 (O(1), 매우 빠름) ──
-        {
-            std::lock_guard<std::mutex> lock(scan_mutex_);
-            pending_scan_x_ = xs;
-            pending_scan_y_ = ys;
-            has_pending_scan_ = true;
+        if(scan_mailbox_.submit(xs, ys)){
+            QMetaObject::invokeMethod(this, [this](){ processLatestScan(); }, Qt::QueuedConnection);
         }
+    }
 
-        // ── 2. 이미 처리 중이면 리턴 — 현재 처리가 끝난 뒤 다음 이벤트가 최신값을 처리 ──
-        bool expected = false;
-        if(!processing_busy_.compare_exchange_strong(expected, true)){
+    void ScanMatchBackend::processLatestScan(){
+        ScanAxis latest_xs;
+        ScanAxis latest_ys;
+        if(!scan_mailbox_.takeLatest(latest_xs, latest_ys)){
+            if(scan_mailbox_.completeProcessing()){
+                QMetaObject::invokeMethod(this, [this](){ processLatestScan(); }, Qt::QueuedConnection);
+            }
             return;
         }
 
-        // ── 3. 버퍼에서 최신 스캔 가져오기 (Qt큐의 오래된 xs/ys가 아닌 진짜 최신값) ──
-        ScanAxis latest_xs, latest_ys;
-        {
-            std::lock_guard<std::mutex> lock(scan_mutex_);
-            if(!has_pending_scan_){
-                processing_busy_ = false;
-                return;
-            }
-            latest_xs = std::move(pending_scan_x_);
-            latest_ys = std::move(pending_scan_y_);
-            has_pending_scan_ = false;
-        }
+        processScan(latest_xs, latest_ys);
 
+        // Process one scan per Qt event so other backend events are not starved.
+        // If producers overwrote the mailbox meanwhile, reserve one follow-up.
+        if(scan_mailbox_.completeProcessing()){
+            QMetaObject::invokeMethod(this, [this](){ processLatestScan(); }, Qt::QueuedConnection);
+        }
+    }
+
+    void ScanMatchBackend::processScan(const ScanAxis& latest_xs, const ScanAxis& latest_ys){
         // ── 거리 게이팅 ──
         auto t_start = std::chrono::steady_clock::now();
 
@@ -145,7 +145,6 @@ namespace rcl_scan_match_backend{
             emit scanUpdated(pixel_x, pixel_y);
             emit predictedPose(map_x, map_y, map_theta);
             if(ros_pub_) ros_pub_->publishPoseAndTF(map_x, map_y, map_theta, odom_x, odom_y, odom_theta);
-            processing_busy_ = false;
             return;
         }
 
@@ -181,7 +180,7 @@ namespace rcl_scan_match_backend{
             }
 
             frame_index = 1;
-            lut_valid_ = false;  // 맵이 바뀌었으니 LUT 캐시 무효화
+            force_csm_ = true;  // reference map이 바뀌었으니 다음 매칭에서 coarse search
             ref_cache_valid_ = false;  // world_map이 바뀌었으니 ref 캐시도 무효화
             qDebug()<<"Sub "<<preciouse(map_x, 3)<<" "<<preciouse(map_y, 3)<<" "<<preciouse(map_theta, 3);
             qDebug()<<"Odom "<<preciouse(odom_x, 3)<<" "<<preciouse(odom_y, 3)<<" "<<preciouse(odom_theta, 3);
@@ -232,17 +231,16 @@ namespace rcl_scan_match_backend{
             // odom 변위가 충분할 때만 CSM, 그 외엔 NDT만
             double disp_xy = std::sqrt((map_x - last_csm_x_) * (map_x - last_csm_x_) + (map_y - last_csm_y_) * (map_y - last_csm_y_));
             double disp_theta = std::abs(normalizeAngle(map_theta - last_csm_theta_));
-            bool need_csm = (disp_xy > 0.15 || disp_theta > 0.1 || !lut_valid_);
+            bool need_csm = (disp_xy > 0.15 || disp_theta > 0.1 || force_csm_);
 
             Param p;
             if(need_csm){
-                // LUT 재빌드 & CSM → NDT
+                // LUT는 현재 reference에 종속되므로 CSM을 실행하는 이 프레임에서만 사용한다.
                 auto t_lut0 = std::chrono::steady_clock::now();
-                cached_lut_ = scan_matcher.buildLookupTable(world_x, world_y, 0.02, 0.05);
-                lut_valid_ = true;
+                LookupTable lut = scan_matcher.buildLookupTable(world_x, world_y, 0.02, 0.05);
                 auto t_lut1 = std::chrono::steady_clock::now();
 
-                p = scan_matcher.runCSM(scan_x, scan_y, cached_lut_, map_x, map_y, map_theta,
+                p = scan_matcher.runCSM(scan_x, scan_y, lut, map_x, map_y, map_theta,
                         0.3, 0.2, 0.05, 0.02, 0.005, 0.002);
                 auto t_csm1 = std::chrono::steady_clock::now();
 
@@ -252,6 +250,7 @@ namespace rcl_scan_match_backend{
                 last_csm_x_ = p.tx;
                 last_csm_y_ = p.ty;
                 last_csm_theta_ = p.theta;
+                force_csm_ = false;
 
                 auto ms_lut = std::chrono::duration_cast<std::chrono::microseconds>(t_lut1 - t_lut0).count();
                 auto ms_csm = std::chrono::duration_cast<std::chrono::microseconds>(t_csm1 - t_lut1).count();
@@ -305,6 +304,5 @@ namespace rcl_scan_match_backend{
         emit predictedPose(map_x, map_y, map_theta);
         if(ros_pub_) ros_pub_->publishPoseAndTF(map_x, map_y, map_theta, odom_x, odom_y, odom_theta);
 
-        processing_busy_ = false;
     }
 }

@@ -4,6 +4,7 @@
 #include "scan_match.h"
 #include "map_backend.h"
 #include "my_pose_graph.h"
+#include "latest_scan_mailbox.h"
 #include "bridge.h"
 
 #include <QObject>
@@ -31,20 +32,16 @@ namespace rcl_scan_match_backend{
         std::atomic<double> map_x, map_y, map_theta, odom_x, odom_y, odom_theta, imu_theta;
         size_t sub_map_index = 0, frame_index = 0;
 
-        // 최신 스캔 버퍼: signal은 여기에 저장만, 처리는 항상 최신값으로
-        std::mutex scan_mutex_;
-        ScanAxis pending_scan_x_, pending_scan_y_;
-        bool has_pending_scan_ = false;
-        std::atomic<bool> processing_busy_{false};
+        // Producer 쪽에서 오래된 스캔을 덮어쓰고 backend 작업은 하나만 예약한다.
+        LatestScanMailbox scan_mailbox_;
 
         // 거리 게이팅: 충분히 이동했을 때만 스캔 매칭
         double last_match_x_ = 0, last_match_y_ = 0, last_match_theta_ = 0;
         static constexpr double kMinTravelDistance = 0.01;  // 1cm
         static constexpr double kMinTravelAngle = 0.005;     // ~0.3도
 
-        // CSM 캐시 & 호출 빈도 제어
-        rcl_scan_match::LookupTable cached_lut_;
-        bool lut_valid_ = false;
+        // CSM 호출 빈도 제어. reference map이 바뀌면 다음 매칭에서 강제 실행한다.
+        bool force_csm_ = true;
         double last_csm_x_ = 0, last_csm_y_ = 0, last_csm_theta_ = 0;
 
         // ROS2 퍼블리셔
@@ -68,6 +65,9 @@ namespace rcl_scan_match_backend{
     
     public Q_SLOTS:
         void lidarUpdate(const ScanAxis& xs, const ScanAxis& ys);
+    private:
+        void processLatestScan();
+        void processScan(const ScanAxis& xs, const ScanAxis& ys);
     public Q_SLOTS:
         void odomUpdate(double x, double y, double z, double rx, double ry, double rz);
     public Q_SLOTS:
