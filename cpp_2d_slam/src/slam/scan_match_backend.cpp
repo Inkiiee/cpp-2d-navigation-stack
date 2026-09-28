@@ -52,11 +52,28 @@ namespace rcl_scan_match_backend{
     std::mutex* ScanMatchBackend::getSharedDataMutex(){
         return &shared_data_mutex_;
     }
+    RobotBasePose ScanMatchBackend::getCurrentPose() const{
+        return RobotBasePose(map_x.load(), map_y.load(), map_theta.load());
+    }
 
     void ScanMatchBackend::odomUpdate(double x, double y, double /*z*/, double /*rx*/, double /*ry*/, double rz){
+        const double heading = normalizeAngle(rz);
+        if(!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(heading)){
+            return;
+        }
+
+        // Odometry reports an absolute pose in its own frame. The first sample
+        // establishes that frame's origin; it is not robot motion.
+        if(!odom_initialized_){
+            odom_x = x;
+            odom_y = y;
+            odom_theta = heading;
+            odom_initialized_ = true;
+            return;
+        }
+
         double change_x = x - odom_x;
         double change_y = y - odom_y;
-        double heading = rz;
         double change_theta = normalizeAngle(heading - odom_theta);
 
         double local_dx = cos(odom_theta) * change_x + sin(odom_theta) * change_y;

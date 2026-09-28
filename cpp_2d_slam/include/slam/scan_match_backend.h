@@ -30,6 +30,7 @@ namespace rcl_scan_match_backend{
         std::mutex shared_data_mutex_;
 
         std::atomic<double> map_x, map_y, map_theta, odom_x, odom_y, odom_theta, imu_theta;
+        bool odom_initialized_ = false;
         size_t sub_map_index = 0, frame_index = 0;
 
         // Producer 쪽에서 오래된 스캔을 덮어쓰고 backend 작업은 하나만 예약한다.
@@ -62,6 +63,7 @@ namespace rcl_scan_match_backend{
         rcl_map_backend::MapBackend* getWorldMap();
         rcl_map_backend::MapBackend* getLocalMap();
         std::mutex* getSharedDataMutex();
+        rcl_slam_basic_type::RobotBasePose getCurrentPose() const;
     
     public Q_SLOTS:
         void lidarUpdate(const ScanAxis& xs, const ScanAxis& ys);
