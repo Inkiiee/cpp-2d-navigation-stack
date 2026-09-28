@@ -53,6 +53,8 @@ ROS2 데이터를 Qt signal/slot 시스템으로 전달하는 중개 계층이�
 
 - odom/IMU 히스토리를 최대 400 샘플까지 유지
 - 선형 보간으로 임의 시점의 pose/yaw 추정
+- 최신 odom/IMU보다 미래인 빔 시각은 외삽하지 않고 최신 pose로 제한
+- 시뮬레이션 시간이 뒤로 이동하면 기존 pose 히스토리를 초기화
 - 보간 실패 시 raw 극좌표 변환으로 fallback
 
 ### 2.2 Signal 목록

@@ -53,21 +53,10 @@ bool Bridge::sampleYawLocked(double stamp, double& yaw) const{
     }
 
     if(stamp >= imu_history_.back().first){
-        const auto& last = imu_history_.back();
-        if(imu_history_.size() < 2){
-            yaw = last.second;
-            return true;
-        }
-
-        const auto& prev = imu_history_[imu_history_.size() - 2];
-        double dt = last.first - prev.first;
-        if(dt <= 1e-6){
-            yaw = last.second;
-            return true;
-        }
-
-        double ratio = (stamp - prev.first) / dt;
-        yaw = interpolateAngle(prev.second, last.second, ratio);
+        // Do not extrapolate beyond the newest sensor sample. At startup a
+        // tiny sample interval can otherwise amplify a small timestamp skew
+        // into a very large yaw correction.
+        yaw = imu_history_.back().second;
         return true;
     }
 
@@ -104,24 +93,10 @@ bool Bridge::samplePoseLocked(double stamp, TimedPose& pose) const{
     }
 
     if(stamp >= odom_history_.back().stamp){
-        const auto& last = odom_history_.back();
-        if(odom_history_.size() < 2){
-            pose = last;
-            return true;
-        }
-
-        const auto& prev = odom_history_[odom_history_.size() - 2];
-        double dt = last.stamp - prev.stamp;
-        if(dt <= 1e-6){
-            pose = last;
-            return true;
-        }
-
-        double ratio = (stamp - prev.stamp) / dt;
-        pose.stamp = stamp;
-        pose.x = prev.x + (last.x - prev.x) * ratio;
-        pose.y = prev.y + (last.y - prev.y) * ratio;
-        pose.yaw = interpolateAngle(prev.yaw, last.yaw, ratio);
+        // Clamp to the newest odometry pose instead of extrapolating. Scan
+        // callbacks commonly arrive slightly ahead of odometry; unrestricted
+        // extrapolation is especially unstable during startup acceleration.
+        pose = odom_history_.back();
         return true;
     }
 
@@ -169,6 +144,9 @@ void Bridge::emitOdomDataReceived(double stamp, double x, double y, double z, do
 
     {
         std::lock_guard<std::mutex> lock(pose_mutex_);
+        if(!odom_history_.empty() && stamp < odom_history_.back().stamp){
+            odom_history_.clear();
+        }
         TimedPose pose;
         pose.stamp = stamp;
         pose.x = x;
@@ -185,6 +163,9 @@ void Bridge::emitImuHeadingReceived(double stamp, double rx, double ry, double r
     double yaw = quaternionToYaw(rx, ry, rz, rw);
     {
         std::lock_guard<std::mutex> lock(pose_mutex_);
+        if(!imu_history_.empty() && stamp < imu_history_.back().first){
+            imu_history_.clear();
+        }
         imu_history_.push_back({stamp, yaw});
         trimHistoryLocked();
     }
