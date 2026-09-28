@@ -2,6 +2,7 @@
 #define __RCL_SCAN_MATCH_H__
 
 #include <map>
+#include <limits>
 #include <unordered_map>
 #include <Eigen/Dense>
 
@@ -12,6 +13,12 @@ namespace rcl_scan_match_type{
         int iter_count;
         double rmse;
         Param(double ttx=0, double tty=0, double ttheta=0, int iter=0, double r=0);
+    };
+
+    struct MatchQuality{
+        double rmse = std::numeric_limits<double>::infinity();
+        double inlier_ratio = 0.0;
+        bool accepted = false;
     };
 
     // Correlative Scan Matcher (Karto-style) For CSM
@@ -71,6 +78,10 @@ namespace rcl_scan_match{
         double cal_inlier_ratio(
             std::vector<double>& curr_x, std::vector<double>& curr_y, 
             std::vector<double>& prev_x, std::vector<double>& prev_y, double error_cost, Param p) const;
+        MatchQuality evaluateMatchQuality(
+            std::vector<double>& reference_x, std::vector<double>& reference_y,
+            std::vector<double>& scan_x, std::vector<double>& scan_y, Param p,
+            double inlier_distance, double max_rmse, double min_inlier_ratio) const;
         
         // ─── Iterative Closest Point (Point to Point) ────────────────────────────────
         Param runICP(

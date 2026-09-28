@@ -125,6 +125,7 @@ if(BUILD_TESTING)
     test/test_pose_graph.cpp
     test/test_slam_threads.cpp
     test/test_latest_scan_mailbox.cpp
+    test/test_scan_match_quality.cpp
   )
   target_link_libraries(test_cpp_2d_slam ${PROJECT_NAME}_core)
   set_tests_properties(test_cpp_2d_slam PROPERTIES

@@ -14,6 +14,12 @@ namespace rcl_scan_match_backend{
     using namespace rcl_pose_graph;
     using namespace rcl_map_backend;
 
+    namespace{
+        constexpr double kMatchInlierDistance = 0.20;
+        constexpr double kMaxMatchRmse = 0.35;
+        constexpr double kMinMatchInlierRatio = 0.30;
+    }
+
     ScanMatchBackend::ScanMatchBackend(Bridge* b, double pos_r, QObject* parent): QObject(parent), bridge{b}, world_map(pos_r), local_map(pos_r){
         map_x = 0, map_y = 0, map_theta = 0;
         odom_x = 0, odom_y = 0, odom_theta = 0;
@@ -228,6 +234,10 @@ namespace rcl_scan_match_backend{
             std::vector<double> scan_x(latest_xs.begin(), latest_xs.end()), scan_y(latest_ys.begin(), latest_ys.end());
             int scan_pts = static_cast<int>(scan_x.size());
 
+            const double predicted_x = map_x;
+            const double predicted_y = map_y;
+            const double predicted_theta = map_theta;
+
             // odom 변위가 충분할 때만 CSM, 그 외엔 NDT만
             double disp_xy = std::sqrt((map_x - last_csm_x_) * (map_x - last_csm_x_) + (map_y - last_csm_y_) * (map_y - last_csm_y_));
             double disp_theta = std::abs(normalizeAngle(map_theta - last_csm_theta_));
@@ -247,11 +257,6 @@ namespace rcl_scan_match_backend{
                 p = scan_matcher.runNDT(scan_x, scan_y, world_x, world_y, p.tx, p.ty, p.theta, 0.1, 0.05, 30, 1e-6);
                 auto t_ndt1 = std::chrono::steady_clock::now();
 
-                last_csm_x_ = p.tx;
-                last_csm_y_ = p.ty;
-                last_csm_theta_ = p.theta;
-                force_csm_ = false;
-
                 auto ms_lut = std::chrono::duration_cast<std::chrono::microseconds>(t_lut1 - t_lut0).count();
                 auto ms_csm = std::chrono::duration_cast<std::chrono::microseconds>(t_csm1 - t_lut1).count();
                 auto ms_ndt = std::chrono::duration_cast<std::chrono::microseconds>(t_ndt1 - t_csm1).count();
@@ -268,14 +273,32 @@ namespace rcl_scan_match_backend{
             }
             p.theta = normalizeAngle(p.theta);
 
+            const MatchQuality quality = scan_matcher.evaluateMatchQuality(
+                world_x, world_y, scan_x, scan_y, p,
+                kMatchInlierDistance, kMaxMatchRmse, kMinMatchInlierRatio);
+            if(!quality.accepted){
+                qWarning() << "[MATCH REJECT] rmse=" << quality.rmse
+                           << "inlier_ratio=" << quality.inlier_ratio
+                           << "ref=" << ref_pts << "scan=" << scan_pts;
+                p.tx = predicted_x;
+                p.ty = predicted_y;
+                p.theta = predicted_theta;
+                force_csm_ = true;
+            } else if(need_csm){
+                last_csm_x_ = p.tx;
+                last_csm_y_ = p.ty;
+                last_csm_theta_ = p.theta;
+                force_csm_ = false;
+            }
+
             // 매칭 결과가 odom 예측과 너무 다르면 가중 평균 (급격한 점프 방지)
-            double jump_xy = std::sqrt((p.tx - map_x) * (p.tx - map_x) + (p.ty - map_y) * (p.ty - map_y));
-            double jump_theta = std::abs(normalizeAngle(p.theta - map_theta));
+            double jump_xy = std::sqrt((p.tx - predicted_x) * (p.tx - predicted_x) + (p.ty - predicted_y) * (p.ty - predicted_y));
+            double jump_theta = std::abs(normalizeAngle(p.theta - predicted_theta));
             if(jump_xy > 0.3 || jump_theta > 0.15){
                 constexpr double alpha = 0.3;
-                p.tx = map_x + alpha * (p.tx - map_x);
-                p.ty = map_y + alpha * (p.ty - map_y);
-                p.theta = normalizeAngle(map_theta + alpha * normalizeAngle(p.theta - map_theta));
+                p.tx = predicted_x + alpha * (p.tx - predicted_x);
+                p.ty = predicted_y + alpha * (p.ty - predicted_y);
+                p.theta = normalizeAngle(predicted_theta + alpha * normalizeAngle(p.theta - predicted_theta));
             }
 
             map_x = p.tx;

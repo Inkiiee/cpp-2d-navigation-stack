@@ -43,11 +43,16 @@ namespace rcl_scan_match{
         std::vector<double>& curr_x, std::vector<double>& curr_y, 
         std::vector<double>& prev_x, std::vector<double>& prev_y, Param p) const
     {
-        int N = std::min(prev_x.size(), curr_x.size());
+        if(curr_x.empty() || curr_x.size() != curr_y.size()
+            || prev_x.empty() || prev_x.size() != prev_y.size()){
+            return std::numeric_limits<double>::infinity();
+        }
+
+        const std::size_t N = prev_x.size();
         CloudTree ct(curr_x, curr_y);
         double rmse = 0;
 
-        for(int i=0; i<N; i++){
+        for(std::size_t i=0; i<N; i++){
             double x = std::cos(p.theta) * prev_x[i] - std::sin(p.theta) * prev_y[i] + p.tx;
             double y = std::sin(p.theta) * prev_x[i] + std::cos(p.theta) * prev_y[i] + p.ty;
 
@@ -66,9 +71,15 @@ namespace rcl_scan_match{
         std::vector<double>& curr_x, std::vector<double>& curr_y,
         std::vector<double>& prev_x, std::vector<double>& prev_y, double error_cost, Param p) const
     {
-        size_t N = std::min(prev_x.size(), curr_x.size());
+        if(curr_x.empty() || curr_x.size() != curr_y.size()
+            || prev_x.empty() || prev_x.size() != prev_y.size()
+            || !std::isfinite(error_cost) || error_cost <= 0.0){
+            return 0.0;
+        }
+
+        const std::size_t N = prev_x.size();
         CloudTree ct(curr_x, curr_y);
-        int count = 0;
+        std::size_t count = 0;
 
         for(size_t i=0; i<N; i++){
             double x = std::cos(p.theta) * prev_x[i] - std::sin(p.theta) * prev_y[i] + p.tx;
@@ -83,7 +94,41 @@ namespace rcl_scan_match{
             if(distance <= error_cost) count++;
         }
 
-        return ((double)count) / N;
+        return static_cast<double>(count) / static_cast<double>(N);
+    }
+
+    MatchQuality ScanMatcher::evaluateMatchQuality(
+        std::vector<double>& reference_x, std::vector<double>& reference_y,
+        std::vector<double>& scan_x, std::vector<double>& scan_y, Param p,
+        double inlier_distance, double max_rmse, double min_inlier_ratio) const
+    {
+        MatchQuality quality;
+        const bool valid_input = !reference_x.empty()
+            && reference_x.size() == reference_y.size()
+            && !scan_x.empty()
+            && scan_x.size() == scan_y.size()
+            && std::isfinite(p.tx)
+            && std::isfinite(p.ty)
+            && std::isfinite(p.theta)
+            && std::isfinite(inlier_distance)
+            && std::isfinite(max_rmse)
+            && std::isfinite(min_inlier_ratio)
+            && inlier_distance > 0.0
+            && max_rmse > 0.0
+            && min_inlier_ratio >= 0.0
+            && min_inlier_ratio <= 1.0;
+        if(!valid_input){
+            return quality;
+        }
+
+        quality.rmse = cal_rmse(reference_x, reference_y, scan_x, scan_y, p);
+        quality.inlier_ratio = cal_inlier_ratio(
+            reference_x, reference_y, scan_x, scan_y, inlier_distance, p);
+        quality.accepted = std::isfinite(quality.rmse)
+            && std::isfinite(quality.inlier_ratio)
+            && quality.rmse <= max_rmse
+            && quality.inlier_ratio >= min_inlier_ratio;
+        return quality;
     }
 
     Eigen::MatrixXd ScanMatcher::rotation(double x, double y, double theta) const {

@@ -178,6 +178,16 @@ scan 수신
 | Inlier Ratio | `cal_inlier_ratio` | 임계 거리 이내 대응점 비율 |
 | CSM Score | `scoreCandidate` | LUT 기반 매칭 점수 |
 
+### 4.4 온라인 매칭 품질 게이트
+
+CSM/NDT가 계산한 pose는 reference map과 다시 비교한 뒤 아래 조건을 모두 만족할 때만 반영한다.
+
+- inlier 판정 거리: `0.20m`
+- 최대 RMSE: `0.35m`
+- 최소 inlier ratio: `0.30`
+
+검증에 실패하면 해당 scan의 pose 보정은 버리고 odometry 예측을 유지한다. 다음 프레임에서는 CSM을 강제로 다시 실행한다.
+
 
 ## 5. Occupancy Grid Map (`MapBackend`)
 
@@ -196,7 +206,7 @@ scan 수신
 
 ```
 occupied_ratio = hit_count / (hit_count + miss_count)
-static = (occupied_ratio >= 0.55)
+static = (occupied_ratio >= 0.70)
 ```
 
 ### 5.3 Ray Tracing 규칙
