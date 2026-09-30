@@ -22,7 +22,7 @@ Global `/map`이 아직 없어 `/plan`이 나오지 않는 동안에는 `/goal_p
 - `/goal_pose` (`geometry_msgs/msg/PoseStamped`)
 - `/slam_pose` (`geometry_msgs/msg/PoseWithCovarianceStamped`)
 - `/scan_deskewed` (`sensor_msgs/msg/PointCloud2`)
-- `/cmd_vel` (`geometry_msgs/msg/Twist`)
+- `/cmd_vel` (`geometry_msgs/msg/TwistStamped`)
 - `/local_costmap` (`nav_msgs/msg/OccupancyGrid`)
 
 ## 제어 과정

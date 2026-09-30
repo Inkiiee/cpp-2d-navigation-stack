@@ -131,8 +131,8 @@ StandaloneLocalController::StandaloneLocalController()
       &StandaloneLocalController::scanCallback, this,
       std::placeholders::_1));
 
-  cmd_vel_pub_ =
-    create_publisher<geometry_msgs::msg::Twist>(cmd_vel_topic_, rclcpp::QoS(10));
+  cmd_vel_pub_ = create_publisher<geometry_msgs::msg::TwistStamped>(
+    cmd_vel_topic_, rclcpp::QoS(10));
   costmap_pub_ = create_publisher<nav_msgs::msg::OccupancyGrid>(
     costmap_topic_, rclcpp::QoS(1));
 
@@ -258,7 +258,7 @@ void StandaloneLocalController::controlLoop()
   }
 
   last_command_ = command;
-  cmd_vel_pub_->publish(command);
+  publishCommand(command);
 }
 
 geometry_msgs::msg::Twist
@@ -704,10 +704,20 @@ StandaloneLocalController::applyAccelerationLimits(
   return limited;
 }
 
+void StandaloneLocalController::publishCommand(
+  const geometry_msgs::msg::Twist & command)
+{
+  geometry_msgs::msg::TwistStamped stamped_command;
+  stamped_command.header.stamp = now();
+  stamped_command.header.frame_id = robot_frame_;
+  stamped_command.twist = command;
+  cmd_vel_pub_->publish(stamped_command);
+}
+
 void StandaloneLocalController::publishStop()
 {
   last_command_ = geometry_msgs::msg::Twist();
-  cmd_vel_pub_->publish(last_command_);
+  publishCommand(last_command_);
 }
 
 int main(int argc, char ** argv)
