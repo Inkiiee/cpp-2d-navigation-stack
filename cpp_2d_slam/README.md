@@ -262,7 +262,9 @@ odom 변화량을 계산해 현재 `map_*` pose에 반영한다.
 
 #### LOST 및 전역 재위치추정
 
-연속된 scan match가 3회 거부되면 backend는 `TRACKING`에서 `LOST`로 전환한다.
+낮은 overlap이나 낮은 매칭 품질만으로는 `LOST`로 전환하지 않는다. 이 경우 scan correction만
+건너뛰고 odometry pose로 매핑을 계속한다. 충분한 대응점이 있는 scan match가 odometry와 크게
+충돌하는 상황이 3회 연속 확인될 때만 backend가 `TRACKING`에서 `LOST`로 전환한다.
 
 - `LOST`와 `RELOCALIZING` 동안에는 잘못된 위치로 map이 오염되지 않도록 `local_map` 갱신을 중지한다.
 - 누적된 static `world_map` 전체와 과거 pose graph node를 이용해 위치와 방향 후보를 탐색한다.

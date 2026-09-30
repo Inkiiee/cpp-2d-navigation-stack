@@ -157,7 +157,7 @@ namespace rcl_scan_match_backend{
         bool moved_enough = (
             travel_xy >= kMinTravelDistance
             || travel_theta >= kMinTravelAngle
-            || consecutive_match_failures_ > 0);
+            || consecutive_lost_evidence_ > 0);
 
         if(!moved_enough){
             std::vector<double> pixel_x(latest_xs.begin(), latest_xs.end()), pixel_y(latest_ys.begin(), latest_ys.end());
@@ -169,7 +169,7 @@ namespace rcl_scan_match_backend{
             return;
         }
 
-        if(consecutive_match_failures_ == 0 && frame_index++ % 5 == 0){
+        if(consecutive_lost_evidence_ == 0 && frame_index++ % 5 == 0){
             rcl_map_backend_type::sub_map sm;
             local_map.getPos(sm.x, sm.y, true);  // static_only: hit 비율 높은 셀만
 
@@ -320,34 +320,39 @@ namespace rcl_scan_match_backend{
                 p.tx - odom_prediction.tx, p.ty - odom_prediction.ty);
             const double innovation_theta = std::abs(normalizeAngle(
                 p.theta - odom_prediction.theta));
-            const bool tracking_match_valid =
-                rcl_scan_match_fusion::passesQualityGate(
-                    quality, csm_avg_score, fusion_config_)
-                && innovation_xy <= 0.40
-                && innovation_theta <= 0.30;
-            const RobotBasePose fused_pose = tracking_match_valid
+            const auto tracking_mode = rcl_scan_match_fusion::classifyTrackingMode(
+                quality, csm_avg_score, odom_prediction, p, fusion_config_);
+            const bool use_scan_correction =
+                tracking_mode == rcl_scan_match_fusion::TrackingMode::FUSED;
+            const bool lost_evidence =
+                tracking_mode == rcl_scan_match_fusion::TrackingMode::LOST_EVIDENCE;
+            const RobotBasePose fused_pose = use_scan_correction
                 ? rcl_scan_match_fusion::fuse(odom_prediction, p, scan_weight)
                 : odom_prediction;
-            accept_scan_for_mapping = tracking_match_valid;
+            accept_scan_for_mapping = !lost_evidence;
 
-            if(!tracking_match_valid){
-                qWarning() << "Scan match rejected: rmse=" << quality.rmse
+            if(lost_evidence){
+                qWarning() << "Scan/odom contradiction: rmse=" << quality.rmse
                            << "inlier=" << quality.inlier_ratio
                            << "csm_score=" << csm_avg_score
                            << "innovation_xy=" << innovation_xy
                            << "innovation_theta=" << innovation_theta;
+            }else if(!use_scan_correction){
+                qDebug() << "[MATCH DEGRADED] using odometry only: rmse=" << quality.rmse
+                         << "inlier=" << quality.inlier_ratio
+                         << "csm_score=" << csm_avg_score;
             }
             qDebug() << "[MATCH QUALITY] rmse=" << quality.rmse
                      << "inlier=" << quality.inlier_ratio
                      << "csm_score=" << csm_avg_score
                      << "scan_weight=" << scan_weight;
 
-            if(tracking_match_valid && need_csm){
+            if(need_csm){
                 force_csm_ = false;
                 last_csm_x_ = fused_pose.tx;
                 last_csm_y_ = fused_pose.ty;
                 last_csm_theta_ = fused_pose.theta;
-            }else if(!tracking_match_valid){
+            }else if(!use_scan_correction){
                 force_csm_ = true;
             }
 
@@ -358,10 +363,10 @@ namespace rcl_scan_match_backend{
 
         if(match_attempted){
             if(accept_scan_for_mapping){
-                consecutive_match_failures_ = 0;
+                consecutive_lost_evidence_ = 0;
             }else{
-                ++consecutive_match_failures_;
-                if(consecutive_match_failures_ >= kFailuresBeforeLost){
+                ++consecutive_lost_evidence_;
+                if(consecutive_lost_evidence_ >= kLostEvidenceBeforeLost){
                     enterLostState();
                 }
             }
@@ -401,8 +406,8 @@ namespace rcl_scan_match_backend{
         ref_cache_valid_ = false;
         local_map.clearMap();
         match_ref_map_.clearMap();
-        qWarning() << "Localization LOST after" << consecutive_match_failures_
-                   << "consecutive rejected scan matches; map updates are frozen";
+        qWarning() << "Localization LOST after" << consecutive_lost_evidence_
+                   << "consecutive observable scan/odom contradictions; map updates are frozen";
     }
 
     void ScanMatchBackend::processRelocalizationScan(
@@ -487,7 +492,7 @@ namespace rcl_scan_match_backend{
             force_csm_ = true;
             frame_index = 1;
             last_graph_pose_has_odom_ = false;
-            consecutive_match_failures_ = 0;
+            consecutive_lost_evidence_ = 0;
             relocalization_confirmations_ = 0;
             has_relocalization_transform_ = false;
             localization_state_ = LocalizationState::TRACKING;

@@ -11,6 +11,7 @@ namespace
 {
 using rcl_scan_match::ScanMatcher;
 using rcl_scan_match_fusion::Config;
+using rcl_scan_match_fusion::TrackingMode;
 using rcl_scan_match_type::AlignmentQuality;
 using rcl_scan_match_type::Param;
 using rcl_slam_basic_type::RobotBasePose;
@@ -98,5 +99,36 @@ TEST(ScanMatchFusionTest, InterpolatesHeadingAcrossAngleWrap)
         odom_prediction, matched_pose, 0.5);
 
     EXPECT_NEAR(std::abs(fused.theta), pi, 1e-12);
+}
+
+TEST(ScanMatchFusionTest, UsesOdometryWithoutDeclaringLostWhenOverlapIsPoor)
+{
+    const AlignmentQuality poor_overlap{0.70, 0.08, 100};
+    const auto mode = rcl_scan_match_fusion::classifyTrackingMode(
+        poor_overlap,
+        0.05,
+        RobotBasePose{0.0, 0.0, 0.0},
+        RobotBasePose{1.0, 0.0, 0.4});
+
+    EXPECT_EQ(mode, TrackingMode::ODOM_ONLY);
+}
+
+TEST(ScanMatchFusionTest, DeclaresLostEvidenceOnlyForObservableContradiction)
+{
+    const AlignmentQuality observable_match{0.22, 0.45, 100};
+    const auto contradiction = rcl_scan_match_fusion::classifyTrackingMode(
+        observable_match,
+        0.25,
+        RobotBasePose{0.0, 0.0, 0.0},
+        RobotBasePose{0.45, 0.0, 0.0});
+    EXPECT_EQ(contradiction, TrackingMode::LOST_EVIDENCE);
+
+    const AlignmentQuality good_match{0.05, 0.90, 100};
+    const auto normal_tracking = rcl_scan_match_fusion::classifyTrackingMode(
+        good_match,
+        0.70,
+        RobotBasePose{0.0, 0.0, 0.0},
+        RobotBasePose{0.05, 0.0, 0.02});
+    EXPECT_EQ(normal_tracking, TrackingMode::FUSED);
 }
 }

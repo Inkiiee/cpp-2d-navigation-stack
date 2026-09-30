@@ -26,6 +26,13 @@ struct Config
     double correction_angle_scale = 0.12;
 };
 
+enum class TrackingMode
+{
+    FUSED,
+    ODOM_ONLY,
+    LOST_EVIDENCE
+};
+
 inline bool isFinitePose(const rcl_slam_basic_type::RobotBasePose& pose)
 {
     return std::isfinite(pose.tx) && std::isfinite(pose.ty) && std::isfinite(pose.theta);
@@ -53,6 +60,44 @@ inline double normalizedConfidence(double value, double bad, double good)
         return value >= good ? 1.0 : 0.0;
     }
     return std::clamp((value - bad) / (good - bad), 0.0, 1.0);
+}
+
+inline TrackingMode classifyTrackingMode(
+    const rcl_scan_match_type::AlignmentQuality& quality,
+    double csm_avg_score,
+    const rcl_slam_basic_type::RobotBasePose& odom_prediction,
+    const rcl_slam_basic_type::RobotBasePose& matched_pose,
+    const Config& config = Config{})
+{
+    if(!isFinitePose(odom_prediction) || !isFinitePose(matched_pose)){
+        return TrackingMode::ODOM_ONLY;
+    }
+
+    const double innovation_xy = std::hypot(
+        matched_pose.tx - odom_prediction.tx,
+        matched_pose.ty - odom_prediction.ty);
+    const double innovation_theta = std::abs(
+        rcl_slam_basic_transform::normalizeAngle(
+            matched_pose.theta - odom_prediction.theta));
+    const bool large_innovation = innovation_xy > 0.30 || innovation_theta > 0.20;
+
+    // Low overlap is common while entering an unexplored area and is not proof
+    // that localization is lost. Only a reasonably supported, contradictory
+    // match is allowed to contribute LOST evidence.
+    const bool contradiction_is_observable =
+        std::isfinite(quality.rmse)
+        && std::isfinite(quality.inlier_ratio)
+        && quality.sample_count >= config.min_samples
+        && quality.rmse <= 0.50
+        && quality.inlier_ratio >= 0.20
+        && (!std::isfinite(csm_avg_score) || csm_avg_score >= 0.10);
+    if(large_innovation && contradiction_is_observable){
+        return TrackingMode::LOST_EVIDENCE;
+    }
+
+    return passesQualityGate(quality, csm_avg_score, config)
+        ? TrackingMode::FUSED
+        : TrackingMode::ODOM_ONLY;
 }
 
 inline double correctionWeight(

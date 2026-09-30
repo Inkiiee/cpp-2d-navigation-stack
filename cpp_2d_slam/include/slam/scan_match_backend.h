@@ -48,12 +48,12 @@ namespace rcl_scan_match_backend{
             RELOCALIZING
         };
         LocalizationState localization_state_ = LocalizationState::TRACKING;
-        int consecutive_match_failures_ = 0;
+        int consecutive_lost_evidence_ = 0;
         int relocalization_scan_count_ = 0;
         int relocalization_confirmations_ = 0;
         bool has_relocalization_transform_ = false;
         rcl_slam_basic_type::RobotBasePose last_relocalization_map_to_odom_;
-        static constexpr int kFailuresBeforeLost = 3;
+        static constexpr int kLostEvidenceBeforeLost = 3;
         static constexpr int kRelocalizationStride = 3;
         static constexpr int kRelocalizationConfirmations = 2;
 
