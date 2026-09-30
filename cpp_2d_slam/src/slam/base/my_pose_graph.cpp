@@ -301,6 +301,22 @@ namespace rcl_pose_graph{
                 information(0, 0) = edge.info_tx;
                 information(1, 1) = edge.info_ty;
                 information(2, 2) = edge.info_theta;
+
+                // The built-in solver mirrors g2o's Huber kernel for loop edges.
+                // This prevents one incorrect scan match from overwhelming odometry.
+                if(edge.is_loop){
+                    constexpr double kHuberDelta = 1.0;
+                    const double chi_squared =
+                        (error.transpose() * information * error).value();
+                    if(!std::isfinite(chi_squared)){
+                        pose_history = original_poses;
+                        return false;
+                    }
+                    const double error_norm = std::sqrt(std::max(chi_squared, 0.0));
+                    if(error_norm > kHuberDelta){
+                        information *= kHuberDelta / error_norm;
+                    }
+                }
                 A(0, 0) = -std::cos(theta);
                 A(0, 1) = -std::sin(theta);
                 A(0, 2) = std::sin(theta) * dx - std::cos(theta) * dy;

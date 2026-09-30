@@ -79,4 +79,28 @@ namespace{
             EXPECT_DOUBLE_EQ(after[i].theta, before[i].theta);
         }
     }
+
+    TEST(PoseGraphTest, RobustLoopDoesNotOverwhelmOdometryChain){
+        PoseGraph graph;
+        graph.addPose(0.0, 0.0, 0.0);
+        graph.addPose(1.0, 0.0, 0.0);
+        graph.addPose(2.0, 0.0, 0.0);
+
+        Edge odom_01(0, 1, 25.0, 25.0, 50.0, false);
+        odom_01.set_relative_pose(Node{1.0, 0.0, 0.0});
+        graph.addEdge(odom_01);
+        Edge odom_12(1, 2, 25.0, 25.0, 50.0, false);
+        odom_12.set_relative_pose(Node{1.0, 0.0, 0.0});
+        graph.addEdge(odom_12);
+
+        Edge false_loop(0, 2, 30.0, 30.0, 60.0, true);
+        false_loop.set_relative_pose(Node{20.0, 0.0, 0.0});
+        graph.addEdge(false_loop);
+
+        ASSERT_TRUE(graph.loopOptimize(20, 1e-8));
+        const auto poses = graph.getPoseSnapshot();
+        ASSERT_EQ(poses.size(), 3U);
+        EXPECT_LT(poses[2].tx, 5.0);
+        EXPECT_GT(poses[2].tx, 1.5);
+    }
 }

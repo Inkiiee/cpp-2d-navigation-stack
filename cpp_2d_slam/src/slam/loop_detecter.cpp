@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <QDebug>
 
 namespace rcl_loop_detecter{
@@ -16,6 +17,16 @@ namespace rcl_loop_detecter{
         constexpr int kMaxCandidatesForRefinement = 3;
         constexpr double kMinInitialAvgScore = 0.12;
         constexpr int kOptimizeEveryNLoopEdges = 2;
+        constexpr double kMinLoopAvgScore = 0.35;
+        constexpr double kMaxLoopRmse = 0.30;
+        constexpr double kMinLoopInlierRatio = 0.35;
+
+        double normalizedConfidence(double value, double bad, double good){
+            if(good == bad){
+                return value >= good ? 1.0 : 0.0;
+            }
+            return std::clamp((value - bad) / (good - bad), 0.0, 1.0);
+        }
     }
 
     LoopDetecter::LoopDetecter(PoseGraph* pg, std::vector<rcl_map_backend::sub_map>* sm, std::mutex* mutex, QObject* parent)
@@ -128,7 +139,11 @@ namespace rcl_loop_detecter{
                             par.tx, par.ty, par.theta, 0.1, 0.05, 30, 1e-6);
                 auto t_ndt1 = std::chrono::steady_clock::now();
 
-                double rmse = scan_matcher.cal_rmse(candidate_submap.x, candidate_submap.y, current_submap.x, current_submap.y, par);
+                const auto alignment = scan_matcher.evaluateAlignment(
+                    candidate_submap.x, candidate_submap.y,
+                    current_submap.x, current_submap.y,
+                    par, 0.20);
+                const double rmse = alignment.rmse;
 
                 // CSM score로 검증: 평균 score가 높아야 진짜 루프
                 double score = scan_matcher.scoreCandidate(lut, current_submap.x, current_submap.y, par.tx, par.ty, par.theta);
@@ -140,16 +155,37 @@ namespace rcl_loop_detecter{
                 qDebug() << "[TIMING detectLoop candidate" << candidate_index << "]"
                          << " LUT=" << us_lut << "us CSM=" << us_csm << "us NDT=" << us_ndt << "us"
                          << " refPts=" << candidate_submap.x.size() << " scanPts=" << current_submap.x.size()
-                         << " avg_score=" << avg_score << " rmse=" << rmse;
+                         << " avg_score=" << avg_score << " rmse=" << rmse
+                         << " inlier=" << alignment.inlier_ratio;
 
-                if(rmse < 0.5 && avg_score > 0.3){
+                if(std::isfinite(rmse)
+                    && rmse < kMaxLoopRmse
+                    && avg_score > kMinLoopAvgScore
+                    && alignment.inlier_ratio > kMinLoopInlierRatio){
                     bool should_optimize = false;
                     int last_node_index = -1;
                     Node old_node;
                     {
                         std::lock_guard<std::mutex> lock(*shared_data_mutex);
 
-                        Edge e(candidate_index, current_index, 100.0, 100.0, 100.0, true);
+                        const double score_confidence = normalizedConfidence(
+                            avg_score, kMinLoopAvgScore, 0.70);
+                        const double rmse_confidence = normalizedConfidence(
+                            rmse, kMaxLoopRmse, 0.08);
+                        const double inlier_confidence = normalizedConfidence(
+                            alignment.inlier_ratio, kMinLoopInlierRatio, 0.80);
+                        const double confidence = std::min(
+                            score_confidence,
+                            std::min(rmse_confidence, inlier_confidence));
+                        const double translation_information = 10.0 + 20.0 * confidence;
+                        const double rotation_information = 20.0 + 40.0 * confidence;
+
+                        Edge e(
+                            candidate_index, current_index,
+                            translation_information,
+                            translation_information,
+                            rotation_information,
+                            true);
                         e.set_relative_pose(par);
                         pose_graph->addEdge(e);
 

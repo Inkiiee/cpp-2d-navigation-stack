@@ -183,7 +183,7 @@ flowchart TD
     E --> F[초기 score 검증]
     F -- 낮음 --> G[다음 후보]
     F -- 통과 --> H[CSM + NDT 정밀 매칭]
-    H --> I{RMSE < 0.5 AND score > 0.3?}
+    H --> I{RMSE < 0.30 AND score > 0.35 AND inlier > 0.35?}
     I -- No --> G
     I -- Yes --> J[loop edge 추가]
     J --> K{누적 edge >= 2?}
@@ -240,8 +240,9 @@ odom 변화량을 계산해 현재 `map_*` pose에 반영한다.
 3. submap 저장 시에는 현재 pose inverse를 적용해서 local 좌표계로 변환
 4. 최근 local map + 주변 world map 점들을 합쳐 reference map 생성
 5. 필요시 CSM 후 NDT, 아니면 NDT만 수행
-6. 결과가 odom 예측에서 너무 튀면 가중 평균으로 완화
-7. 결과 pose로 현재 scan을 world 좌표로 변환해서 `local_map`에 누적
+6. RMSE, inlier ratio, CSM 평균 score로 매칭 품질 검증
+7. 품질과 odom prediction 차이에 따라 scan correction을 최대 35%만 적용
+8. 융합 pose로 현재 scan을 world 좌표로 변환해서 `local_map`에 누적
 
 #### scan matching 정책
 
@@ -254,6 +255,9 @@ odom 변화량을 계산해 현재 `map_*` pose에 반영한다.
 
 - CSM: 넓은 범위 coarse search
 - NDT: 주변에서 fine alignment
+- odom prior: CSM 후보가 odom prediction에서 멀수록 점수 감점
+- quality gate: 품질이 낮은 매칭 결과는 적용하지 않음
+- correction fusion: 품질이 좋아도 odom 65% 이상을 유지
 - 자주 CSM을 호출하지 않아서 속도를 아낌
 
 
@@ -269,7 +273,7 @@ submap 간 loop closure 후보를 찾고, 검증되면 pose graph에 loop edge�
 4. 현재 submap과 과거 submap 사이의 초기 상대 pose를 계산
 5. 초기 평균 score가 낮으면 탈락
 6. `CSM -> NDT`로 상대 변환 정밀화
-7. RMSE와 평균 score 둘 다 만족하면 loop edge 등록
+7. RMSE, 평균 score, inlier ratio를 모두 만족하면 loop edge 등록
 8. loop edge가 일정 개수 이상이면 `pose_graph->loopOptimize()` 실행
 
 현재 정책상 loop edge를 찾을 때마다 바로 최적화하지 않고,
@@ -283,8 +287,8 @@ submap 간 loop closure 후보를 찾고, 검증되면 pose graph에 loop edge�
 submap pose 히스토리와 edge를 저장한다.
 
 - node: 각 submap의 global pose
-- odom edge: 연속 프레임 간 상대 이동
-- loop edge: loop closure로 추가된 강한 제약
+- odom edge: raw odometry에서 계산한 연속 submap 간 상대 이동
+- loop edge: 매칭 품질에 따라 information을 조절하는 robust 제약
 
 #### 최적화 경로
 
@@ -457,7 +461,8 @@ Qt 위젯 기반 디버그 시각화 계층이다.
 - CSM LUT는 현재 reference 점군에 종속되므로 CSM을 호출하는 프레임에서 생성해 해당 호출에만 사용한다.
 - `match_ref_map_`로 local/world 점들을 합친 뒤 reference를 구성한다.
 - world reference 점군은 맵 변경 또는 로봇이 캐시 중심에서 0.5m 이상 이동했을 때 갱신한다.
-- matching 결과가 odom 예측에서 너무 멀면 `alpha = 0.3`으로 제한한다.
+- scan correction은 품질과 innovation 크기에 따라 `0.0~0.35` 범위로 연속 조절한다.
+- 품질 기준은 RMSE `0.30m` 이하, inlier ratio `0.35` 이상이며 CSM 실행 시 평균 score `0.18` 이상이다.
 
 
 ## 현재 성능 관련 포인트

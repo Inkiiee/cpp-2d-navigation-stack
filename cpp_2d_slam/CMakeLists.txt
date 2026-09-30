@@ -123,6 +123,7 @@ if(BUILD_TESTING)
 
   ament_add_gtest(test_cpp_2d_slam
     test/test_pose_graph.cpp
+    test/test_scan_match_fusion.cpp
     test/test_slam_threads.cpp
     test/test_latest_scan_mailbox.cpp
   )

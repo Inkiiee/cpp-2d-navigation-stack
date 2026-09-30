@@ -5,6 +5,7 @@
 #include "map_backend.h"
 #include "my_pose_graph.h"
 #include "latest_scan_mailbox.h"
+#include "scan_match_fusion.h"
 #include "bridge.h"
 
 #include <QObject>
@@ -31,6 +32,13 @@ namespace rcl_scan_match_backend{
 
         std::atomic<double> map_x, map_y, map_theta, odom_x, odom_y, odom_theta, imu_theta;
         size_t sub_map_index = 0, frame_index = 0;
+        bool odom_initialized_ = false;
+        bool last_graph_pose_has_odom_ = false;
+        rcl_slam_basic_type::RobotBasePose last_graph_odom_pose_;
+
+        static constexpr double kOdomTranslationInformation = 25.0;
+        static constexpr double kOdomRotationInformation = 50.0;
+        rcl_scan_match_fusion::Config fusion_config_;
 
         // Producer 쪽에서 오래된 스캔을 덮어쓰고 backend 작업은 하나만 예약한다.
         LatestScanMailbox scan_mailbox_;

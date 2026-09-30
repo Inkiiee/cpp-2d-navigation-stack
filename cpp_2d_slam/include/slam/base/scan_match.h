@@ -2,6 +2,8 @@
 #define __RCL_SCAN_MATCH_H__
 
 #include <map>
+#include <cstddef>
+#include <limits>
 #include <unordered_map>
 #include <Eigen/Dense>
 
@@ -12,6 +14,12 @@ namespace rcl_scan_match_type{
         int iter_count;
         double rmse;
         Param(double ttx=0, double tty=0, double ttheta=0, int iter=0, double r=0);
+    };
+
+    struct AlignmentQuality{
+        double rmse = std::numeric_limits<double>::infinity();
+        double inlier_ratio = 0.0;
+        std::size_t sample_count = 0;
     };
 
     // Correlative Scan Matcher (Karto-style) For CSM
@@ -71,6 +79,10 @@ namespace rcl_scan_match{
         double cal_inlier_ratio(
             std::vector<double>& curr_x, std::vector<double>& curr_y, 
             std::vector<double>& prev_x, std::vector<double>& prev_y, double error_cost, Param p) const;
+        AlignmentQuality evaluateAlignment(
+            const std::vector<double>& ref_x, const std::vector<double>& ref_y,
+            const std::vector<double>& scan_x, const std::vector<double>& scan_y,
+            const Param& pose, double inlier_distance) const;
         
         // ─── Iterative Closest Point (Point to Point) ────────────────────────────────
         Param runICP(
@@ -123,14 +135,18 @@ namespace rcl_scan_match{
             double search_xy = 0.5, double search_theta = 0.35,
             double coarse_xy_res = 0.05, double coarse_angle_res = 0.0175,
             double fine_xy_res = 0.005, double fine_angle_res = 0.00175,
-            double lut_resolution = 0.02, double smear_sigma = 0.05);
+            double lut_resolution = 0.02, double smear_sigma = 0.05,
+            double translation_prior_weight = 0.0,
+            double rotation_prior_weight = 0.0);
         Param runCSM(
             std::vector<double>& scan_x, std::vector<double>& scan_y,
             const LookupTable& lut,
             double init_tx, double init_ty, double init_theta,
             double search_xy = 0.5, double search_theta = 0.35,
             double coarse_xy_res = 0.05, double coarse_angle_res = 0.0175,
-            double fine_xy_res = 0.005, double fine_angle_res = 0.00175);
+            double fine_xy_res = 0.005, double fine_angle_res = 0.00175,
+            double translation_prior_weight = 0.0,
+            double rotation_prior_weight = 0.0);
     };
 }
 

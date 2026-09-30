@@ -5,6 +5,7 @@
 
 #include <cmath>
 #include <chrono>
+#include <limits>
 #include <QDebug>
 
 namespace rcl_scan_match_backend{
@@ -48,9 +49,20 @@ namespace rcl_scan_match_backend{
     }
 
     void ScanMatchBackend::odomUpdate(double x, double y, double /*z*/, double /*rx*/, double /*ry*/, double rz){
+        double heading = normalizeAngle(rz);
+        if(!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(heading)){
+            return;
+        }
+        if(!odom_initialized_){
+            odom_x = x;
+            odom_y = y;
+            odom_theta = heading;
+            odom_initialized_ = true;
+            return;
+        }
+
         double change_x = x - odom_x;
         double change_y = y - odom_y;
-        double heading = rz;
         double change_theta = normalizeAngle(heading - odom_theta);
 
         double local_dx = cos(odom_theta) * change_x + sin(odom_theta) * change_y;
@@ -153,6 +165,8 @@ namespace rcl_scan_match_backend{
             local_map.getPos(sm.x, sm.y, true);  // static_only: hit 비율 높은 셀만
 
             RobotBasePose currentPose{map_x, map_y, map_theta};
+            RobotBasePose currentOdomPose{odom_x, odom_y, odom_theta};
+            const bool current_pose_has_odom = odom_initialized_;
             // 로컬 좌표계에서의 센서 원점 (로컬 기준이므로 0,0)
             sm.sensor_x = 0;
             sm.sensor_y = 0;
@@ -173,8 +187,24 @@ namespace rcl_scan_match_backend{
 
                 // 연속 노드 간 오도메트리 엣지 추가 (루프 최적화 시 궤적 유지에 필수)
                 if(current_index > 0){
-                    pose_graph.addEdge(current_index - 1, current_index, 1.0, 1.0, 1.0, false);
+                    if(last_graph_pose_has_odom_ && current_pose_has_odom){
+                        rcl_pose_graph_type::Edge odom_edge(
+                            current_index - 1, current_index,
+                            kOdomTranslationInformation,
+                            kOdomTranslationInformation,
+                            kOdomRotationInformation,
+                            false);
+                        odom_edge.set_relative_pose(relativePose(last_graph_odom_pose_, currentOdomPose));
+                        pose_graph.addEdge(odom_edge);
+                    }else{
+                        // Odom이 늦게 시작된 경우 graph 연결만 유지하는 저신뢰 fallback.
+                        pose_graph.addEdge(current_index - 1, current_index, 1.0, 1.0, 1.0, false);
+                    }
                 }
+                last_graph_odom_pose_.tx = currentOdomPose.tx;
+                last_graph_odom_pose_.ty = currentOdomPose.ty;
+                last_graph_odom_pose_.theta = currentOdomPose.theta;
+                last_graph_pose_has_odom_ = current_pose_has_odom;
 
                 local_map.clearMap();
             }
@@ -227,6 +257,8 @@ namespace rcl_scan_match_backend{
         if(!world_x.empty()){
             std::vector<double> scan_x(latest_xs.begin(), latest_xs.end()), scan_y(latest_ys.begin(), latest_ys.end());
             int scan_pts = static_cast<int>(scan_x.size());
+            const RobotBasePose odom_prediction{map_x, map_y, map_theta};
+            double csm_avg_score = std::numeric_limits<double>::quiet_NaN();
 
             // odom 변위가 충분할 때만 CSM, 그 외엔 NDT만
             double disp_xy = std::sqrt((map_x - last_csm_x_) * (map_x - last_csm_x_) + (map_y - last_csm_y_) * (map_y - last_csm_y_));
@@ -241,16 +273,16 @@ namespace rcl_scan_match_backend{
                 auto t_lut1 = std::chrono::steady_clock::now();
 
                 p = scan_matcher.runCSM(scan_x, scan_y, lut, map_x, map_y, map_theta,
-                        0.3, 0.2, 0.05, 0.02, 0.005, 0.002);
+                        0.3, 0.2, 0.05, 0.02, 0.005, 0.002,
+                        0.12, 0.08);
                 auto t_csm1 = std::chrono::steady_clock::now();
 
                 p = scan_matcher.runNDT(scan_x, scan_y, world_x, world_y, p.tx, p.ty, p.theta, 0.1, 0.05, 30, 1e-6);
                 auto t_ndt1 = std::chrono::steady_clock::now();
 
-                last_csm_x_ = p.tx;
-                last_csm_y_ = p.ty;
-                last_csm_theta_ = p.theta;
-                force_csm_ = false;
+                const double csm_score = scan_matcher.scoreCandidate(
+                    lut, scan_x, scan_y, p.tx, p.ty, p.theta);
+                csm_avg_score = scan_x.empty() ? 0.0 : csm_score / scan_x.size();
 
                 auto ms_lut = std::chrono::duration_cast<std::chrono::microseconds>(t_lut1 - t_lut0).count();
                 auto ms_csm = std::chrono::duration_cast<std::chrono::microseconds>(t_csm1 - t_lut1).count();
@@ -268,19 +300,36 @@ namespace rcl_scan_match_backend{
             }
             p.theta = normalizeAngle(p.theta);
 
-            // 매칭 결과가 odom 예측과 너무 다르면 가중 평균 (급격한 점프 방지)
-            double jump_xy = std::sqrt((p.tx - map_x) * (p.tx - map_x) + (p.ty - map_y) * (p.ty - map_y));
-            double jump_theta = std::abs(normalizeAngle(p.theta - map_theta));
-            if(jump_xy > 0.3 || jump_theta > 0.15){
-                constexpr double alpha = 0.3;
-                p.tx = map_x + alpha * (p.tx - map_x);
-                p.ty = map_y + alpha * (p.ty - map_y);
-                p.theta = normalizeAngle(map_theta + alpha * normalizeAngle(p.theta - map_theta));
+            const auto quality = scan_matcher.evaluateAlignment(
+                world_x, world_y, scan_x, scan_y, p, 0.20);
+            const double scan_weight = rcl_scan_match_fusion::correctionWeight(
+                quality, csm_avg_score, odom_prediction, p, fusion_config_);
+            const RobotBasePose fused_pose = rcl_scan_match_fusion::fuse(
+                odom_prediction, p, scan_weight);
+
+            if(scan_weight <= 0.0){
+                qWarning() << "Scan match rejected: rmse=" << quality.rmse
+                           << "inlier=" << quality.inlier_ratio
+                           << "csm_score=" << csm_avg_score;
+            }
+            qDebug() << "[MATCH QUALITY] rmse=" << quality.rmse
+                     << "inlier=" << quality.inlier_ratio
+                     << "csm_score=" << csm_avg_score
+                     << "scan_weight=" << scan_weight;
+
+            if(need_csm){
+                force_csm_ = false;
+                last_csm_x_ = fused_pose.tx;
+                last_csm_y_ = fused_pose.ty;
+                last_csm_theta_ = fused_pose.theta;
+            }else if(scan_weight <= 0.0){
+                // Retry once with the wider matcher, then return to distance gating.
+                force_csm_ = true;
             }
 
-            map_x = p.tx;
-            map_y = p.ty;
-            map_theta = p.theta;
+            map_x = fused_pose.tx;
+            map_y = fused_pose.ty;
+            map_theta = fused_pose.theta;
         }
 
         pixel_x.assign(latest_xs.begin(), latest_xs.end());

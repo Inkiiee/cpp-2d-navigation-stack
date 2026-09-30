@@ -1,6 +1,7 @@
 #include "scan_match.h"
 
 #include <cmath>
+#include <limits>
 #include <vector>
 
 namespace rcl_scan_match_type{
@@ -27,8 +28,9 @@ namespace rcl_scan_match_type{
 
 namespace rcl_scan_match{
     ScanMatcher::CloudTree::CloudTree(const std::vector<double>& x, const std::vector<double>& y) {
-        cloud.pts.reserve(x.size());
-        for (size_t i = 0; i < x.size(); ++i) {
+        const std::size_t point_count = std::min(x.size(), y.size());
+        cloud.pts.reserve(point_count);
+        for (std::size_t i = 0; i < point_count; ++i) {
             cloud.pts.push_back(Point{x[i], y[i]});
         }
         tree = new KDTree(2, cloud, nanoflann::KDTreeSingleIndexAdaptorParams(10));
@@ -43,47 +45,62 @@ namespace rcl_scan_match{
         std::vector<double>& curr_x, std::vector<double>& curr_y, 
         std::vector<double>& prev_x, std::vector<double>& prev_y, Param p) const
     {
-        int N = std::min(prev_x.size(), curr_x.size());
-        CloudTree ct(curr_x, curr_y);
-        double rmse = 0;
-
-        for(int i=0; i<N; i++){
-            double x = std::cos(p.theta) * prev_x[i] - std::sin(p.theta) * prev_y[i] + p.tx;
-            double y = std::sin(p.theta) * prev_x[i] + std::cos(p.theta) * prev_y[i] + p.ty;
-
-            std::vector<double> nx, ny;
-            knnSearch(ct.tree, ct.cloud, x, y, 1, nx, ny);
-
-            double dx = x - nx[0];
-            double dy = y - ny[0];
-            rmse += (dx * dx + dy * dy);
-        }
-
-        return std::sqrt(rmse / N);
+        return evaluateAlignment(curr_x, curr_y, prev_x, prev_y, p, 0.20).rmse;
     }
 
     double ScanMatcher::cal_inlier_ratio(
         std::vector<double>& curr_x, std::vector<double>& curr_y,
         std::vector<double>& prev_x, std::vector<double>& prev_y, double error_cost, Param p) const
     {
-        size_t N = std::min(prev_x.size(), curr_x.size());
-        CloudTree ct(curr_x, curr_y);
-        int count = 0;
+        return evaluateAlignment(curr_x, curr_y, prev_x, prev_y, p, error_cost).inlier_ratio;
+    }
 
-        for(size_t i=0; i<N; i++){
-            double x = std::cos(p.theta) * prev_x[i] - std::sin(p.theta) * prev_y[i] + p.tx;
-            double y = std::sin(p.theta) * prev_x[i] + std::cos(p.theta) * prev_y[i] + p.ty;
-
-            std::vector<double> nx, ny;
-            knnSearch(ct.tree, ct.cloud, x, y, 1, nx, ny);
-
-            double dx = x - nx[0];
-            double dy = y - ny[0];
-            double distance = std::sqrt(dx * dx + dy * dy);
-            if(distance <= error_cost) count++;
+    AlignmentQuality ScanMatcher::evaluateAlignment(
+        const std::vector<double>& ref_x, const std::vector<double>& ref_y,
+        const std::vector<double>& scan_x, const std::vector<double>& scan_y,
+        const Param& pose, double inlier_distance) const
+    {
+        AlignmentQuality quality;
+        const std::size_t ref_count = std::min(ref_x.size(), ref_y.size());
+        const std::size_t scan_count = std::min(scan_x.size(), scan_y.size());
+        if(ref_count == 0 || scan_count == 0 || inlier_distance <= 0.0
+            || !std::isfinite(pose.tx) || !std::isfinite(pose.ty)
+            || !std::isfinite(pose.theta)){
+            return quality;
         }
 
-        return ((double)count) / N;
+        CloudTree reference(ref_x, ref_y);
+
+        double squared_error_sum = 0.0;
+        std::size_t inlier_count = 0;
+        const double cos_theta = std::cos(pose.theta);
+        const double sin_theta = std::sin(pose.theta);
+        for(std::size_t i = 0; i < scan_count; ++i){
+            const double x = cos_theta * scan_x[i] - sin_theta * scan_y[i] + pose.tx;
+            const double y = sin_theta * scan_x[i] + cos_theta * scan_y[i] + pose.ty;
+
+            std::vector<double> nearest_x, nearest_y;
+            knnSearch(reference.tree, reference.cloud, x, y, 1, nearest_x, nearest_y);
+            if(nearest_x.empty() || nearest_y.empty()){
+                continue;
+            }
+
+            const double dx = x - nearest_x.front();
+            const double dy = y - nearest_y.front();
+            const double squared_error = dx * dx + dy * dy;
+            squared_error_sum += squared_error;
+            if(squared_error <= inlier_distance * inlier_distance){
+                ++inlier_count;
+            }
+            ++quality.sample_count;
+        }
+
+        if(quality.sample_count == 0){
+            return quality;
+        }
+        quality.rmse = std::sqrt(squared_error_sum / quality.sample_count);
+        quality.inlier_ratio = static_cast<double>(inlier_count) / quality.sample_count;
+        return quality;
     }
 
     Eigen::MatrixXd ScanMatcher::rotation(double x, double y, double theta) const {
@@ -124,7 +141,10 @@ namespace rcl_scan_match{
     int k, int maxIter, double epsilon) const
     {
         int iter = 0;
-        int N = std::min(prev_x.size(), curr_x.size());
+        const int N = static_cast<int>(std::min(prev_x.size(), prev_y.size()));
+        if(N == 0 || curr_x.empty() || curr_y.empty()){
+            return Param();
+        }
         CloudTree ct(curr_x, curr_y);
 
         std::vector<double> A_x = prev_x; // Source (previous scan)
@@ -397,11 +417,15 @@ namespace rcl_scan_match{
         double tx, double ty, double theta, double resolution, double step,
         int maxIter, double epsilon) const
     {
-        int N = std::min(prev_x.size(), curr_x.size());
+        const int N = static_cast<int>(std::min(prev_x.size(), prev_y.size()));
+        const std::size_t reference_count = std::min(curr_x.size(), curr_y.size());
+        if(N == 0 || reference_count == 0){
+            return Param(tx, ty, theta);
+        }
         cells_type cells;
         cell_info_type cells_info;
 
-        for(size_t i=0; i<curr_x.size(); i++){
+        for(std::size_t i = 0; i < reference_count; ++i){
             cell c = {curr_x[i], curr_y[i]};
             add_cell(cells, c, resolution);
         }
@@ -443,6 +467,7 @@ namespace rcl_scan_match{
         for(iter = 0; iter < maxIter; iter++){
             Eigen::Matrix3d H = Eigen::Matrix3d::Zero();
             Eigen::Vector3d b = Eigen::Vector3d::Zero();
+            int correspondence_count = 0;
             double sin_theta = std::sin(theta);
             double cos_theta = std::cos(theta);
             for(int i=0; i<N; i++){
@@ -470,9 +495,21 @@ namespace rcl_scan_match{
 
                 H += (Ji.transpose() * info.cov_inv * Ji);
                 b += (Ji.transpose() * info.cov_inv * r);
+                ++correspondence_count;
             }
 
-            Eigen::Vector3d delta = H.ldlt().solve(b);
+            if(correspondence_count < 6 || !H.allFinite() || !b.allFinite()){
+                break;
+            }
+
+            Eigen::LDLT<Eigen::Matrix3d> solver(H);
+            if(solver.info() != Eigen::Success){
+                break;
+            }
+            Eigen::Vector3d delta = solver.solve(b);
+            if(solver.info() != Eigen::Success || !delta.allFinite()){
+                break;
+            }
             if (delta.norm() > 1.0) delta *= 1.0 / delta.norm(); // clip
             if(delta.norm() < epsilon){ iter++; break;}
 
@@ -605,7 +642,8 @@ namespace rcl_scan_match{
         double init_tx, double init_ty, double init_theta,
         double search_xy, double search_theta,
         double coarse_xy_res, double coarse_angle_res,
-        double fine_xy_res, double fine_angle_res)
+        double fine_xy_res, double fine_angle_res,
+        double translation_prior_weight, double rotation_prior_weight)
     {
         Param best;
         best.tx = init_tx;
@@ -634,6 +672,7 @@ namespace rcl_scan_match{
 
         // ── Pass 1: Coarse search ──
         double best_score = -1.0;
+        double best_objective = -std::numeric_limits<double>::infinity();
 
         for (double dtheta = -search_theta; dtheta <= search_theta; dtheta += coarse_angle_res) {
             double cand_theta = init_theta + dtheta;
@@ -659,7 +698,15 @@ namespace rcl_scan_match{
                             static_cast<unsigned>(gy) < static_cast<unsigned>(H))
                             score += lut_data[gy * W + gx];
                     }
-                    if (score > best_score) {
+                    const double translation_ratio = search_xy > 0.0
+                        ? std::hypot(dx, dy) / search_xy : 0.0;
+                    const double rotation_ratio = search_theta > 0.0
+                        ? std::abs(dtheta) / search_theta : 0.0;
+                    const double objective = score / static_cast<double>(N_coarse)
+                        - translation_prior_weight * translation_ratio * translation_ratio
+                        - rotation_prior_weight * rotation_ratio * rotation_ratio;
+                    if (objective > best_objective) {
+                        best_objective = objective;
                         best_score = score;
                         best.tx = init_tx + dx;
                         best.ty = init_ty + dy;
@@ -674,6 +721,7 @@ namespace rcl_scan_match{
         double fine_ty = best.ty;
         double fine_theta = best.theta;
         best_score = -1.0;
+        best_objective = -std::numeric_limits<double>::infinity();
 
         for (double dtheta = -coarse_angle_res; dtheta <= coarse_angle_res; dtheta += fine_angle_res) {
             double cand_theta = fine_theta + dtheta;
@@ -699,11 +747,24 @@ namespace rcl_scan_match{
                             static_cast<unsigned>(gy) < static_cast<unsigned>(H))
                             score += lut_data[gy * W + gx];
                     }
-                    if (score > best_score) {
+                    const double candidate_tx = fine_tx + dx;
+                    const double candidate_ty = fine_ty + dy;
+                    const double candidate_theta = cand_theta;
+                    const double translation_ratio = search_xy > 0.0
+                        ? std::hypot(candidate_tx - init_tx, candidate_ty - init_ty) / search_xy
+                        : 0.0;
+                    const double rotation_ratio = search_theta > 0.0
+                        ? std::abs(normalizeAngle(candidate_theta - init_theta)) / search_theta
+                        : 0.0;
+                    const double objective = score / static_cast<double>(N)
+                        - translation_prior_weight * translation_ratio * translation_ratio
+                        - rotation_prior_weight * rotation_ratio * rotation_ratio;
+                    if (objective > best_objective) {
+                        best_objective = objective;
                         best_score = score;
-                        best.tx = fine_tx + dx;
-                        best.ty = fine_ty + dy;
-                        best.theta = cand_theta;
+                        best.tx = candidate_tx;
+                        best.ty = candidate_ty;
+                        best.theta = candidate_theta;
                     }
                 }
             }
@@ -723,7 +784,8 @@ namespace rcl_scan_match{
         double search_xy, double search_theta,
         double coarse_xy_res, double coarse_angle_res,
         double fine_xy_res, double fine_angle_res,
-        double lut_resolution, double smear_sigma)
+        double lut_resolution, double smear_sigma,
+        double translation_prior_weight, double rotation_prior_weight)
     {
         if (scan_x.empty() || ref_x.empty()) {
             Param p; p.tx = init_tx; p.ty = init_ty; p.theta = init_theta; return p;
@@ -731,6 +793,7 @@ namespace rcl_scan_match{
         LookupTable lut = buildLookupTable(ref_x, ref_y, lut_resolution, smear_sigma);
         return runCSM(scan_x, scan_y, lut, init_tx, init_ty, init_theta,
                       search_xy, search_theta, coarse_xy_res, coarse_angle_res,
-                      fine_xy_res, fine_angle_res);
+                      fine_xy_res, fine_angle_res,
+                      translation_prior_weight, rotation_prior_weight);
     }
 }
