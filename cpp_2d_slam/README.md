@@ -260,6 +260,20 @@ odom 변화량을 계산해 현재 `map_*` pose에 반영한다.
 - correction fusion: 품질이 좋아도 odom 65% 이상을 유지
 - 자주 CSM을 호출하지 않아서 속도를 아낌
 
+#### LOST 및 전역 재위치추정
+
+연속된 scan match가 3회 거부되면 backend는 `TRACKING`에서 `LOST`로 전환한다.
+
+- `LOST`와 `RELOCALIZING` 동안에는 잘못된 위치로 map이 오염되지 않도록 `local_map` 갱신을 중지한다.
+- 누적된 static `world_map` 전체와 과거 pose graph node를 이용해 위치와 방향 후보를 탐색한다.
+- 반복 구조에서 비슷한 후보가 둘 이상 나오면 score margin 검사를 통해 복구를 거부한다.
+- 서로 다른 두 scan이 일관된 `map -> odom` 변환을 만들 때만 pose를 재설정한다.
+- 복구가 확정되면 local map과 reference cache를 초기화하고 `TRACKING`으로 돌아간다.
+
+관련 로그는 `Localization LOST`, `Relocalization candidate`,
+`Relocalization confirmed` 문자열로 확인할 수 있다. 충분한 static map이 아직 생성되지 않았거나
+환경이 완전히 대칭이면 안전을 위해 후보를 선택하지 않는다.
+
 
 ### 2. `LoopDetecter`
 

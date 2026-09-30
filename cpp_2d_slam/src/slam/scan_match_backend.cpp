@@ -14,6 +14,7 @@ namespace rcl_scan_match_backend{
     using namespace rcl_slam_basic_transform;
     using namespace rcl_pose_graph;
     using namespace rcl_map_backend;
+    using namespace rcl_scan_relocalizer;
 
     ScanMatchBackend::ScanMatchBackend(Bridge* b, double pos_r, QObject* parent): QObject(parent), bridge{b}, world_map(pos_r), local_map(pos_r){
         map_x = 0, map_y = 0, map_theta = 0;
@@ -146,9 +147,17 @@ namespace rcl_scan_match_backend{
         // ── 거리 게이팅 ──
         auto t_start = std::chrono::steady_clock::now();
 
+        if(localization_state_ != LocalizationState::TRACKING){
+            processRelocalizationScan(latest_xs, latest_ys);
+            return;
+        }
+
         double travel_xy = std::sqrt((map_x - last_match_x_) * (map_x - last_match_x_) + (map_y - last_match_y_) * (map_y - last_match_y_));
         double travel_theta = std::abs(normalizeAngle(map_theta - last_match_theta_));
-        bool moved_enough = (travel_xy >= kMinTravelDistance || travel_theta >= kMinTravelAngle);
+        bool moved_enough = (
+            travel_xy >= kMinTravelDistance
+            || travel_theta >= kMinTravelAngle
+            || consecutive_match_failures_ > 0);
 
         if(!moved_enough){
             std::vector<double> pixel_x(latest_xs.begin(), latest_xs.end()), pixel_y(latest_ys.begin(), latest_ys.end());
@@ -160,7 +169,7 @@ namespace rcl_scan_match_backend{
             return;
         }
 
-        if(frame_index++ % 5 == 0){
+        if(consecutive_match_failures_ == 0 && frame_index++ % 5 == 0){
             rcl_map_backend_type::sub_map sm;
             local_map.getPos(sm.x, sm.y, true);  // static_only: hit 비율 높은 셀만
 
@@ -253,8 +262,11 @@ namespace rcl_scan_match_backend{
 
         auto t_ref = std::chrono::steady_clock::now();
         int ref_pts = static_cast<int>(world_x.size());
+        bool match_attempted = false;
+        bool accept_scan_for_mapping = true;
 
         if(!world_x.empty()){
+            match_attempted = true;
             std::vector<double> scan_x(latest_xs.begin(), latest_xs.end()), scan_y(latest_ys.begin(), latest_ys.end());
             int scan_pts = static_cast<int>(scan_x.size());
             const RobotBasePose odom_prediction{map_x, map_y, map_theta};
@@ -304,26 +316,38 @@ namespace rcl_scan_match_backend{
                 world_x, world_y, scan_x, scan_y, p, 0.20);
             const double scan_weight = rcl_scan_match_fusion::correctionWeight(
                 quality, csm_avg_score, odom_prediction, p, fusion_config_);
-            const RobotBasePose fused_pose = rcl_scan_match_fusion::fuse(
-                odom_prediction, p, scan_weight);
+            const double innovation_xy = std::hypot(
+                p.tx - odom_prediction.tx, p.ty - odom_prediction.ty);
+            const double innovation_theta = std::abs(normalizeAngle(
+                p.theta - odom_prediction.theta));
+            const bool tracking_match_valid =
+                rcl_scan_match_fusion::passesQualityGate(
+                    quality, csm_avg_score, fusion_config_)
+                && innovation_xy <= 0.40
+                && innovation_theta <= 0.30;
+            const RobotBasePose fused_pose = tracking_match_valid
+                ? rcl_scan_match_fusion::fuse(odom_prediction, p, scan_weight)
+                : odom_prediction;
+            accept_scan_for_mapping = tracking_match_valid;
 
-            if(scan_weight <= 0.0){
+            if(!tracking_match_valid){
                 qWarning() << "Scan match rejected: rmse=" << quality.rmse
                            << "inlier=" << quality.inlier_ratio
-                           << "csm_score=" << csm_avg_score;
+                           << "csm_score=" << csm_avg_score
+                           << "innovation_xy=" << innovation_xy
+                           << "innovation_theta=" << innovation_theta;
             }
             qDebug() << "[MATCH QUALITY] rmse=" << quality.rmse
                      << "inlier=" << quality.inlier_ratio
                      << "csm_score=" << csm_avg_score
                      << "scan_weight=" << scan_weight;
 
-            if(need_csm){
+            if(tracking_match_valid && need_csm){
                 force_csm_ = false;
                 last_csm_x_ = fused_pose.tx;
                 last_csm_y_ = fused_pose.ty;
                 last_csm_theta_ = fused_pose.theta;
-            }else if(scan_weight <= 0.0){
-                // Retry once with the wider matcher, then return to distance gating.
+            }else if(!tracking_match_valid){
                 force_csm_ = true;
             }
 
@@ -332,11 +356,24 @@ namespace rcl_scan_match_backend{
             map_theta = fused_pose.theta;
         }
 
+        if(match_attempted){
+            if(accept_scan_for_mapping){
+                consecutive_match_failures_ = 0;
+            }else{
+                ++consecutive_match_failures_;
+                if(consecutive_match_failures_ >= kFailuresBeforeLost){
+                    enterLostState();
+                }
+            }
+        }
+
         pixel_x.assign(latest_xs.begin(), latest_xs.end());
         pixel_y.assign(latest_ys.begin(), latest_ys.end());
         rotationAndTranslation(map_x, map_y, map_theta, pixel_x, pixel_y);
 
-        local_map.updateOccupancyMap(map_x, map_y, pixel_x, pixel_y);
+        if(accept_scan_for_mapping && localization_state_ == LocalizationState::TRACKING){
+            local_map.updateOccupancyMap(map_x, map_y, pixel_x, pixel_y);
+        }
 
         last_match_x_ = map_x;
         last_match_y_ = map_y;
@@ -353,5 +390,126 @@ namespace rcl_scan_match_backend{
         emit predictedPose(map_x, map_y, map_theta);
         if(ros_pub_) ros_pub_->publishPoseAndTF(map_x, map_y, map_theta, odom_x, odom_y, odom_theta);
 
+    }
+
+    void ScanMatchBackend::enterLostState(){
+        localization_state_ = LocalizationState::LOST;
+        relocalization_scan_count_ = kRelocalizationStride - 1;
+        relocalization_confirmations_ = 0;
+        has_relocalization_transform_ = false;
+        force_csm_ = true;
+        ref_cache_valid_ = false;
+        local_map.clearMap();
+        match_ref_map_.clearMap();
+        qWarning() << "Localization LOST after" << consecutive_match_failures_
+                   << "consecutive rejected scan matches; map updates are frozen";
+    }
+
+    void ScanMatchBackend::processRelocalizationScan(
+        const ScanAxis& latest_xs, const ScanAxis& latest_ys)
+    {
+        if(localization_state_ == LocalizationState::LOST){
+            ++relocalization_scan_count_;
+            if(relocalization_scan_count_ % kRelocalizationStride != 0){
+                publishScanAtCurrentPose(latest_xs, latest_ys);
+                return;
+            }
+        }
+
+        localization_state_ = LocalizationState::RELOCALIZING;
+        std::vector<double> global_map_x;
+        std::vector<double> global_map_y;
+        std::vector<RobotBasePose> anchors;
+        {
+            std::lock_guard<std::mutex> lock(shared_data_mutex_);
+            world_map.getPos(global_map_x, global_map_y, true);
+            const auto pose_snapshot = pose_graph.getPoseSnapshot();
+            anchors.reserve(pose_snapshot.size() + 1);
+            for(const auto& pose : pose_snapshot){
+                anchors.emplace_back(pose.tx, pose.ty, pose.theta);
+            }
+        }
+        anchors.emplace_back(map_x, map_y, map_theta);
+
+        std::vector<double> scan_x(latest_xs.begin(), latest_xs.end());
+        std::vector<double> scan_y(latest_ys.begin(), latest_ys.end());
+        const auto result = relocalizer_.find(
+            scan_matcher,
+            global_map_x, global_map_y,
+            scan_x, scan_y,
+            anchors);
+
+        if(!result){
+            localization_state_ = LocalizationState::LOST;
+            relocalization_confirmations_ = 0;
+            has_relocalization_transform_ = false;
+            qWarning() << "Global relocalization did not find an unambiguous candidate";
+            publishScanAtCurrentPose(latest_xs, latest_ys);
+            return;
+        }
+
+        const RobotBasePose odom_pose{odom_x, odom_y, odom_theta};
+        const RobotBasePose map_to_odom = ScanRelocalizer::mapToOdomTransform(
+            result->pose, odom_pose);
+        if(has_relocalization_transform_
+            && ScanRelocalizer::transformsAreConsistent(
+                last_relocalization_map_to_odom_, map_to_odom)){
+            ++relocalization_confirmations_;
+        }else{
+            relocalization_confirmations_ = 1;
+        }
+        last_relocalization_map_to_odom_.tx = map_to_odom.tx;
+        last_relocalization_map_to_odom_.ty = map_to_odom.ty;
+        last_relocalization_map_to_odom_.theta = map_to_odom.theta;
+        has_relocalization_transform_ = true;
+
+        qWarning() << "Relocalization candidate: score=" << result->average_score
+                   << "margin=" << result->score_margin
+                   << "rmse=" << result->quality.rmse
+                   << "inlier=" << result->quality.inlier_ratio
+                   << "confirmation=" << relocalization_confirmations_
+                   << "/" << kRelocalizationConfirmations;
+
+        if(relocalization_confirmations_ >= kRelocalizationConfirmations){
+            map_x = result->pose.tx;
+            map_y = result->pose.ty;
+            map_theta = result->pose.theta;
+            last_match_x_ = map_x;
+            last_match_y_ = map_y;
+            last_match_theta_ = map_theta;
+            last_csm_x_ = map_x;
+            last_csm_y_ = map_y;
+            last_csm_theta_ = map_theta;
+
+            local_map.clearMap();
+            match_ref_map_.clearMap();
+            ref_cache_valid_ = false;
+            force_csm_ = true;
+            frame_index = 1;
+            last_graph_pose_has_odom_ = false;
+            consecutive_match_failures_ = 0;
+            relocalization_confirmations_ = 0;
+            has_relocalization_transform_ = false;
+            localization_state_ = LocalizationState::TRACKING;
+            qWarning() << "Relocalization confirmed; TRACKING resumed at"
+                       << map_x << map_y << map_theta;
+        }
+
+        publishScanAtCurrentPose(latest_xs, latest_ys);
+    }
+
+    void ScanMatchBackend::publishScanAtCurrentPose(
+        const ScanAxis& latest_xs, const ScanAxis& latest_ys)
+    {
+        std::vector<double> pixel_x(latest_xs.begin(), latest_xs.end());
+        std::vector<double> pixel_y(latest_ys.begin(), latest_ys.end());
+        rotationAndTranslation(map_x, map_y, map_theta, pixel_x, pixel_y);
+        emit scanUpdated(pixel_x, pixel_y);
+        emit predictedPose(map_x, map_y, map_theta);
+        if(ros_pub_){
+            ros_pub_->publishPoseAndTF(
+                map_x, map_y, map_theta,
+                odom_x, odom_y, odom_theta);
+        }
     }
 }

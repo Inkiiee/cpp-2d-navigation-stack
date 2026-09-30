@@ -62,6 +62,7 @@ set(SLAM_CORE_SOURCES
   src/slam/base/slam_basic.cpp
   src/slam/base/my_pose_graph.cpp
   src/slam/base/map_backend.cpp
+  src/slam/scan_relocalizer.cpp
   src/slam/scan_match_backend.cpp
   src/slam/loop_detecter.cpp
   src/slam/slam.cpp
@@ -124,6 +125,7 @@ if(BUILD_TESTING)
   ament_add_gtest(test_cpp_2d_slam
     test/test_pose_graph.cpp
     test/test_scan_match_fusion.cpp
+    test/test_scan_relocalizer.cpp
     test/test_slam_threads.cpp
     test/test_latest_scan_mailbox.cpp
   )

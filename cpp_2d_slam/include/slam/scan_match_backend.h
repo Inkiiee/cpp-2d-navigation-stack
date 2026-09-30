@@ -6,6 +6,7 @@
 #include "my_pose_graph.h"
 #include "latest_scan_mailbox.h"
 #include "scan_match_fusion.h"
+#include "scan_relocalizer.h"
 #include "bridge.h"
 
 #include <QObject>
@@ -39,6 +40,22 @@ namespace rcl_scan_match_backend{
         static constexpr double kOdomTranslationInformation = 25.0;
         static constexpr double kOdomRotationInformation = 50.0;
         rcl_scan_match_fusion::Config fusion_config_;
+        rcl_scan_relocalizer::ScanRelocalizer relocalizer_;
+
+        enum class LocalizationState{
+            TRACKING,
+            LOST,
+            RELOCALIZING
+        };
+        LocalizationState localization_state_ = LocalizationState::TRACKING;
+        int consecutive_match_failures_ = 0;
+        int relocalization_scan_count_ = 0;
+        int relocalization_confirmations_ = 0;
+        bool has_relocalization_transform_ = false;
+        rcl_slam_basic_type::RobotBasePose last_relocalization_map_to_odom_;
+        static constexpr int kFailuresBeforeLost = 3;
+        static constexpr int kRelocalizationStride = 3;
+        static constexpr int kRelocalizationConfirmations = 2;
 
         // Producer 쪽에서 오래된 스캔을 덮어쓰고 backend 작업은 하나만 예약한다.
         LatestScanMailbox scan_mailbox_;
@@ -76,6 +93,9 @@ namespace rcl_scan_match_backend{
     private:
         void processLatestScan();
         void processScan(const ScanAxis& xs, const ScanAxis& ys);
+        void enterLostState();
+        void processRelocalizationScan(const ScanAxis& xs, const ScanAxis& ys);
+        void publishScanAtCurrentPose(const ScanAxis& xs, const ScanAxis& ys);
     public Q_SLOTS:
         void odomUpdate(double x, double y, double z, double rx, double ry, double rz);
     public Q_SLOTS:
